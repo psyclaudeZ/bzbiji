@@ -37,26 +37,72 @@ private class ImageCanvasView: NSView {
         addGestureRecognizer(dbl)
     }
 
-    // MARK: Gestures
+    // MARK: Cursor
 
-    @objc private func onMag(_ gr: NSMagnificationGestureRecognizer) {
-        scale = max(0.05, scale * (1 + gr.magnification))
-        gr.magnification = 0
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .cursorUpdate, .mouseEnteredAndExited],
+            owner: self, userInfo: nil
+        ))
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.openHand.set()
+    }
+
+    // MARK: Scroll wheel — plain scroll = pan, Cmd+scroll = zoom toward cursor
+
+    override func scrollWheel(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) {
+            let cursor = convert(event.locationInWindow, from: nil)
+            zoomToward(cursor, factor: pow(1.02, -event.scrollingDeltaY))
+        } else {
+            translation.x += event.scrollingDeltaX
+            translation.y += event.scrollingDeltaY
+            needsDisplay = true
+        }
+    }
+
+    private func zoomToward(_ point: CGPoint, factor: CGFloat) {
+        let newScale = max(0.02, min(32, scale * factor))
+        let ratio = newScale / scale
+        // Shift translation so the point under the cursor stays fixed
+        translation.x = point.x - bounds.midX - (point.x - bounds.midX - translation.x) * ratio
+        translation.y = point.y - bounds.midY - (point.y - bounds.midY - translation.y) * ratio
+        scale = newScale
         onScaleUpdate?(scale)
         needsDisplay = true
     }
 
+    // MARK: Gestures
+
+    @objc private func onMag(_ gr: NSMagnificationGestureRecognizer) {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        zoomToward(center, factor: 1 + gr.magnification)
+        gr.magnification = 0
+    }
+
     @objc private func onRot(_ gr: NSRotationGestureRecognizer) {
-        rotation -= gr.rotation   // subtract for natural trackpad feel
+        rotation -= gr.rotation
         gr.rotation = 0
         needsDisplay = true
     }
 
     @objc private func onPan(_ gr: NSPanGestureRecognizer) {
-        if gr.state == .began { translationAtPanStart = translation }
-        let d = gr.translation(in: self)
-        translation = CGPoint(x: translationAtPanStart.x + d.x, y: translationAtPanStart.y + d.y)
-        needsDisplay = true
+        switch gr.state {
+        case .began:
+            translationAtPanStart = translation
+            NSCursor.closedHand.push()
+        case .changed:
+            let d = gr.translation(in: self)
+            translation = CGPoint(x: translationAtPanStart.x + d.x, y: translationAtPanStart.y + d.y)
+            needsDisplay = true
+        default:
+            NSCursor.pop()
+        }
     }
 
     @objc private func onDoubleClick(_ gr: NSClickGestureRecognizer) {
