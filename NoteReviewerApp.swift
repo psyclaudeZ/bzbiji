@@ -9,6 +9,10 @@ struct NoteReviewerApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit Note Reviewer") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
+            }
         }
     }
 }

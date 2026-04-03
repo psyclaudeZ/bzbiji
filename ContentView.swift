@@ -5,8 +5,8 @@ import SwiftUI
 private struct TabBar: View {
     @Binding var selected: Int
     @Binding var names: [String]
+    @Binding var editingTab: Int?
     let onAdd: () -> Void
-    @State private var editingTab: Int? = nil
     @FocusState private var editFocused: Bool
 
     var body: some View {
@@ -74,11 +74,128 @@ private struct TabBar: View {
             Button("Rename") { selected = i; editingTab = i }
             if names.count > 1 {
                 Divider()
-                Button("Close Tab") {
-                    names.remove(at: i)
-                    if selected >= names.count { selected = names.count - 1 }
+                Button("Close Tab") { closeTab(i) }
+            }
+        }
+
+    }
+
+    private func closeTab(_ i: Int) {
+        names.remove(at: i)
+        if selected >= names.count { selected = names.count - 1 }
+    }
+}
+
+// MARK: - Help state (reference type so monitor closure can read/write it)
+
+private class HelpState: ObservableObject {
+    @Published var isShowing = false
+    private var monitor: Any?
+
+    init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.keyCode == 53 && self.isShowing {
+                DispatchQueue.main.async { self.isShowing = false }
+                return nil
+            }
+            return event
+        }
+    }
+
+    deinit {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+    }
+}
+
+// MARK: - Help overlay
+
+private struct ShortcutRow: View {
+    let keys: String
+    let description: String
+
+    var body: some View {
+        HStack {
+            Text(description)
+                .foregroundColor(.primary)
+            Spacer()
+            Text(keys)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color(NSColor.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 4))
+        }
+    }
+}
+
+private struct HelpOverlay: View {
+    @ObservedObject var state: HelpState
+
+    private let sections: [(String, [(String, String)])] = [
+        ("Tabs", [
+            ("New tab",          "⌘T"),
+            ("Close tab",        "⌘W"),
+            ("Rename tab",       "⌘R"),
+            ("Next tab",         "⌘⇧D"),
+            ("Previous tab",     "⌘⇧A"),
+            ("Switch to tab N",  "⌘1 – ⌘8"),
+            ("Last tab",         "⌘9"),
+        ]),
+        ("Image pane", [
+            ("Zoom in / out",    "⌘ + scroll"),
+            ("Pan",              "Scroll / drag"),
+            ("Rotate",           "Two-finger rotate"),
+            ("Reset view",       "Double-click"),
+        ]),
+        ("App", [
+            ("Keyboard shortcuts", "⌘?"),
+            ("Quit",               "⌘Q"),
+        ]),
+    ]
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { state.isShowing = false }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Keyboard Shortcuts")
+                        .font(.headline)
+                    Spacer()
+                    Button { state.isShowing = false } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 18))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding()
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        ForEach(sections, id: \.0) { title, rows in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                                ForEach(rows, id: \.0) { row in
+                                    ShortcutRow(keys: row.1, description: row.0)
+                                }
+                            }
+                        }
+                    }
+                    .padding()
                 }
             }
+            .frame(width: 360)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(.regularMaterial)
+            .cornerRadius(12)
+            .shadow(radius: 20)
         }
     }
 }
@@ -88,45 +205,79 @@ private struct TabBar: View {
 struct ContentView: View {
     @State private var selected = 0
     @State private var tabNames = ["Tab 1", "Tab 2"]
+    @State private var editingTab: Int? = nil
+    @StateObject private var helpState = HelpState()
+
+    private func addTab() {
+        tabNames.append("Tab \(tabNames.count + 1)")
+        selected = tabNames.count - 1
+    }
+
+    private func closeCurrentTab() {
+        guard tabNames.count > 1 else { return }
+        tabNames.remove(at: selected)
+        if selected >= tabNames.count { selected = tabNames.count - 1 }
+    }
+
+    private func selectPrevTab() {
+        selected = selected == 0 ? tabNames.count - 1 : selected - 1
+    }
+
+    private func selectNextTab() {
+        selected = (selected + 1) % tabNames.count
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            TabBar(selected: $selected, names: $tabNames) {
-                tabNames.append("Tab \(tabNames.count + 1)")
-                selected = tabNames.count - 1
-            }
-            Divider()
+        ZStack {
+            VStack(spacing: 0) {
+                TabBar(selected: $selected, names: $tabNames, editingTab: $editingTab, onAdd: addTab)
+                Divider()
 
-            ZStack {
-                ForEach(tabNames.indices, id: \.self) { i in
-                    HSplitView {
-                        MarkdownPane()
-                            .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                        ImagePane()
-                            .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    ForEach(tabNames.indices, id: \.self) { i in
+                        HSplitView {
+                            MarkdownPane()
+                                .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                            ImagePane()
+                                .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .opacity(selected == i ? 1 : 0)
+                        .allowsHitTesting(selected == i)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .opacity(selected == i ? 1 : 0)
-                    .allowsHitTesting(selected == i)
                 }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Hidden shortcut buttons
+            .background(
+                HStack(spacing: 0) {
+                    ForEach(tabNames.indices, id: \.self) { i in
+                        if i < 8 {
+                            Button("") { selected = min(i, tabNames.count - 1) }
+                                .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                        }
+                    }
+                    Button("") { selected = tabNames.count - 1 }
+                        .keyboardShortcut("9", modifiers: .command)
+                    Button("", action: addTab)
+                        .keyboardShortcut("t", modifiers: .command)
+                    Button("", action: closeCurrentTab)
+                        .keyboardShortcut("w", modifiers: .command)
+                    Button("", action: selectPrevTab)
+                        .keyboardShortcut("a", modifiers: [.command, .shift])
+                    Button("", action: selectNextTab)
+                        .keyboardShortcut("d", modifiers: [.command, .shift])
+                    Button("") { helpState.isShowing.toggle() }
+                        .keyboardShortcut("/", modifiers: .command)
+                    Button("") { editingTab = selected }
+                        .keyboardShortcut("r", modifiers: .command)
+                }
+                .opacity(0).frame(width: 0, height: 0).clipped()
+            )
+
+            if helpState.isShowing {
+                HelpOverlay(state: helpState)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            HStack(spacing: 0) {
-                ForEach(tabNames.indices, id: \.self) { i in
-                    if i < 9 {
-                        Button("") { selected = i }
-                            .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
-                    }
-                }
-                Button("") {
-                    tabNames.append("Tab \(tabNames.count + 1)")
-                    selected = tabNames.count - 1
-                }
-                .keyboardShortcut("t", modifiers: .command)
-            }
-            .opacity(0).frame(width: 0, height: 0).clipped()
-        )
     }
 }
