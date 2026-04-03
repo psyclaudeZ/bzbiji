@@ -9,7 +9,7 @@ private class ImageCanvasView: NSView {
     var onScaleUpdate: ((CGFloat) -> Void)?
 
     private var scale: CGFloat = 1.0
-    private var rotation: CGFloat = 0.0          // radians
+    private var rotation: CGFloat = 0.0
     private var translation: CGPoint = .zero
     private var translationAtPanStart: CGPoint = .zero
     private var isDropTarget = false
@@ -37,6 +37,12 @@ private class ImageCanvasView: NSView {
         addGestureRecognizer(dbl)
     }
 
+    func resetTransform(scale s: CGFloat) {
+        scale = s; rotation = 0; translation = .zero
+        onScaleUpdate?(s)
+        needsDisplay = true
+    }
+
     // MARK: Cursor
 
     override func updateTrackingAreas() {
@@ -53,7 +59,7 @@ private class ImageCanvasView: NSView {
         NSCursor.openHand.set()
     }
 
-    // MARK: Scroll wheel — plain scroll = pan, Cmd+scroll = zoom toward cursor
+    // MARK: Scroll wheel
 
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
@@ -69,7 +75,6 @@ private class ImageCanvasView: NSView {
     private func zoomToward(_ point: CGPoint, factor: CGFloat) {
         let newScale = max(0.02, min(32, scale * factor))
         let ratio = newScale / scale
-        // Shift translation so the point under the cursor stays fixed
         translation.x = point.x - bounds.midX - (point.x - bounds.midX - translation.x) * ratio
         translation.y = point.y - bounds.midY - (point.y - bounds.midY - translation.y) * ratio
         scale = newScale
@@ -130,8 +135,6 @@ private class ImageCanvasView: NSView {
             image.draw(in: CGRect(x: -w/2, y: -h/2, width: w, height: h),
                        from: .zero, operation: .sourceOver, fraction: 1)
             ctx.restoreGState()
-        } else {
-            drawPlaceholder()
         }
 
         if isDropTarget {
@@ -139,15 +142,6 @@ private class ImageCanvasView: NSView {
             let p = NSBezierPath(rect: bounds.insetBy(dx: 1.5, dy: 1.5))
             p.lineWidth = 3; p.stroke()
         }
-    }
-
-    private func drawPlaceholder() {
-        let cfg = NSImage.SymbolConfiguration(pointSize: 44, weight: .light)
-        guard let img = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg) else { return }
-        let s = img.size
-        img.draw(at: NSPoint(x: (bounds.width - s.width) / 2, y: (bounds.height - s.height) / 2),
-                 from: .zero, operation: .sourceOver, fraction: 0.35)
     }
 
     // MARK: Drag & drop
@@ -201,6 +195,7 @@ private struct ImageCanvasRepresentable: NSViewRepresentable {
 
     func updateNSView(_ v: ImageCanvasView, context: Context) {
         context.coordinator.parent = self
+        if v.image !== image { v.resetTransform(scale: 1.0) }
         v.image = image
         v.onFileDrop = { url in
             DispatchQueue.main.async { context.coordinator.parent.onFileDrop(url) }
@@ -219,9 +214,9 @@ private struct ImageCanvasRepresentable: NSViewRepresentable {
 // MARK: - SwiftUI View
 
 struct ImagePane: View {
-    @State private var image: NSImage? = nil
-    @State private var fileName: String? = nil
-    @State private var scale: CGFloat = 1.0
+    @Binding var image: NSImage?
+    @Binding var fileName: String?
+    @Binding var scale: CGFloat
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -235,14 +230,16 @@ struct ImagePane: View {
 
             if image == nil {
                 VStack(spacing: 10) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 44))
+                        .foregroundColor(.secondary)
                     Text("Drop an image")
                         .foregroundColor(.secondary)
                     Text(".png  ·  .jpg  ·  .webp")
                         .font(.caption)
                         .foregroundColor(Color(NSColor.tertiaryLabelColor))
                 }
-                .padding(.top, 100)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
             }
 

@@ -7,6 +7,7 @@ private struct TabBar: View {
     @Binding var names: [String]
     @Binding var editingTab: Int?
     let onAdd: () -> Void
+    let onClose: (Int) -> Void
     @FocusState private var editFocused: Bool
 
     var body: some View {
@@ -74,15 +75,9 @@ private struct TabBar: View {
             Button("Rename") { selected = i; editingTab = i }
             if names.count > 1 {
                 Divider()
-                Button("Close Tab") { closeTab(i) }
+                Button("Close Tab") { onClose(i) }
             }
         }
-
-    }
-
-    private func closeTab(_ i: Int) {
-        names.remove(at: i)
-        if selected >= names.count { selected = names.count - 1 }
     }
 }
 
@@ -148,6 +143,7 @@ private struct HelpOverlay: View {
             ("Reset view",       "Double-click"),
         ]),
         ("bzflipping", [
+            ("File browser",       "⌘B"),
             ("Keyboard shortcuts", "⌘?"),
             ("Quit",               "⌘Q"),
         ]),
@@ -203,73 +199,60 @@ private struct HelpOverlay: View {
 // MARK: - Content view
 
 struct ContentView: View {
-    @State private var selected = 0
-    @State private var tabNames = ["Tab 1", "Tab 2"]
+    @State private var tabs = TabManager()
     @State private var editingTab: Int? = nil
     @StateObject private var helpState = HelpState()
-
-    private func addTab() {
-        tabNames.append("Tab \(tabNames.count + 1)")
-        selected = tabNames.count - 1
-    }
-
-    private func closeCurrentTab() {
-        guard tabNames.count > 1 else { return }
-        tabNames.remove(at: selected)
-        if selected >= tabNames.count { selected = tabNames.count - 1 }
-    }
-
-    private func selectPrevTab() {
-        selected = selected == 0 ? tabNames.count - 1 : selected - 1
-    }
-
-    private func selectNextTab() {
-        selected = (selected + 1) % tabNames.count
-    }
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                TabBar(selected: $selected, names: $tabNames, editingTab: $editingTab, onAdd: addTab)
+                TabBar(
+                    selected: $tabs.selected,
+                    names: $tabs.names,
+                    editingTab: $editingTab,
+                    onAdd: { tabs.addTab() },
+                    onClose: { tabs.closeTab(at: $0) }
+                )
                 Divider()
 
-                ZStack {
-                    ForEach(tabNames.indices, id: \.self) { i in
-                        HSplitView {
-                            MarkdownPane()
-                                .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                            ImagePane()
-                                .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .opacity(selected == i ? 1 : 0)
-                        .allowsHitTesting(selected == i)
-                    }
+                HSplitView {
+                    MarkdownPane(
+                        markdownContent: $tabs.contents[tabs.selected].markdownContent,
+                        fileName: $tabs.contents[tabs.selected].markdownFileName
+                    )
+                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                    ImagePane(
+                        image: $tabs.contents[tabs.selected].image,
+                        fileName: $tabs.contents[tabs.selected].imageFileName,
+                        scale: $tabs.contents[tabs.selected].imageScale
+                    )
+                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Hidden shortcut buttons
             .background(
                 HStack(spacing: 0) {
-                    ForEach(tabNames.indices, id: \.self) { i in
+                    ForEach(tabs.names.indices, id: \.self) { i in
                         if i < 8 {
-                            Button("") { selected = min(i, tabNames.count - 1) }
+                            Button("") { tabs.selected = min(i, tabs.count - 1) }
                                 .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
                         }
                     }
-                    Button("") { selected = tabNames.count - 1 }
+                    Button("") { tabs.selectLast() }
                         .keyboardShortcut("9", modifiers: .command)
-                    Button("", action: addTab)
+                    Button("") { tabs.addTab() }
                         .keyboardShortcut("t", modifiers: .command)
-                    Button("", action: closeCurrentTab)
+                    Button("") { tabs.closeSelected() }
                         .keyboardShortcut("w", modifiers: .command)
-                    Button("", action: selectPrevTab)
+                    Button("") { tabs.selectPrev() }
                         .keyboardShortcut("a", modifiers: [.command, .shift])
-                    Button("", action: selectNextTab)
+                    Button("") { tabs.selectNext() }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
                     Button("") { helpState.isShowing.toggle() }
                         .keyboardShortcut("/", modifiers: .command)
-                    Button("") { editingTab = selected }
+                    Button("") { editingTab = tabs.selected }
                         .keyboardShortcut("r", modifiers: .command)
                 }
                 .opacity(0).frame(width: 0, height: 0).clipped()

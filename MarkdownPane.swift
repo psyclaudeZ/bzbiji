@@ -14,7 +14,6 @@ private class DropOverlayView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    // Forward scroll events to WKWebView so the page still scrolls
     override func scrollWheel(with event: NSEvent) {
         scrollTarget?.scrollWheel(with: event)
     }
@@ -47,7 +46,7 @@ private class DropOverlayView: NSView {
 
 private class MarkdownContainerView: NSView {
     private var webView: WKWebView!
-    private var overlay: DropOverlayView!
+    fileprivate var overlay: DropOverlayView!
 
     var onFileDrop: ((URL) -> Void)?
     var onTargetChange: ((Bool) -> Void)?
@@ -96,7 +95,7 @@ private struct MarkdownRepresentable: NSViewRepresentable {
         context.coordinator.parent = self
         v.onFileDrop = { url in DispatchQueue.main.async { context.coordinator.parent.onFileDrop(url) } }
         v.onTargetChange = { val in DispatchQueue.main.async { context.coordinator.parent.isTargeted = val } }
-        if let html { v.loadHTML(html) }
+        if let html { v.loadHTML(html) } else { v.loadHTML("") }
     }
 
     class Coordinator: NSObject {
@@ -108,8 +107,8 @@ private struct MarkdownRepresentable: NSViewRepresentable {
 // MARK: - SwiftUI View
 
 struct MarkdownPane: View {
-    @State private var markdownContent: String? = nil
-    @State private var fileName: String? = nil
+    @Binding var markdownContent: String?
+    @Binding var fileName: String?
     @State private var isTargeted = false
 
     private var html: String? {

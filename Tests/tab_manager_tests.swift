@@ -1,0 +1,161 @@
+// Run with:
+//   swiftc -sdk $(xcrun --show-sdk-path --sdk macosx) -target arm64-apple-macosx13.0 \
+//     -parse-as-library TabManager.swift Tests/tab_manager_tests.swift \
+//     -framework AppKit -o .test_runner \
+//     && ./.test_runner ; rm -f .test_runner
+
+import Foundation
+import AppKit
+
+// MARK: - Minimal test harness
+
+private var failures = 0
+private var passed   = 0
+private var names: [String] = []
+
+private func expect(_ cond: Bool, _ msg: String,
+                    file: String = #file, line: Int = #line) {
+    if cond { passed += 1 }
+    else {
+        let f = URL(fileURLWithPath: file).lastPathComponent
+        print("    FAIL \(f):\(line) — \(msg)")
+        failures += 1
+    }
+}
+
+private func eq<T: Equatable>(_ a: T, _ b: T, _ label: String = "",
+                               file: String = #file, line: Int = #line) {
+    expect(a == b,
+           "\(label.isEmpty ? "" : label + ": ")\(a) != \(b)",
+           file: file, line: line)
+}
+
+private func test(_ name: String, _ body: () -> Void) {
+    body()
+    names.append(name)
+}
+
+// MARK: - Tests
+
+private func runAll() {
+    test("initial state") {
+        let m = TabManager()
+        eq(m.count, 2, "count")
+        eq(m.selected, 0, "selected")
+        eq(m.names[0], "Tab 1")
+        eq(m.names[1], "Tab 2")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("names and contents always equal length") {
+        let m = TabManager()
+        eq(m.names.count, m.contents.count, "lengths equal")
+    }
+
+    test("addTab appends and selects new tab") {
+        var m = TabManager()
+        m.addTab()
+        eq(m.count, 3, "count")
+        eq(m.selected, 2, "selected")
+        eq(m.names[2], "Tab 3", "name")
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("multiple addTabs stay in sync") {
+        var m = TabManager()
+        m.addTab(); m.addTab(); m.addTab()
+        eq(m.count, 5)
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("closeTab at last index clamps selected") {
+        var m = TabManager()
+        m.addTab()           // 3 tabs, selected = 2
+        m.closeTab(at: 2)
+        eq(m.count, 2)
+        eq(m.selected, 1, "clamped")
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("closeTab at first index shifts selected down") {
+        var m = TabManager()
+        m.addTab()           // 3 tabs, selected = 2
+        m.closeTab(at: 0)
+        eq(m.count, 2)
+        eq(m.selected, 1, "shifted down")
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("closeSelected removes active tab") {
+        var m = TabManager()
+        m.addTab()           // 3 tabs, selected = 2
+        m.selected = 1
+        m.closeSelected()
+        eq(m.count, 2)
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("cannot close below 1 tab") {
+        var m = TabManager()
+        m.closeTab(at: 0)   // 2 → 1
+        m.closeTab(at: 0)   // no-op
+        m.closeTab(at: 0)   // no-op
+        eq(m.count, 1, "stays at 1")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("selectNext wraps around") {
+        var m = TabManager()   // 2 tabs, selected = 0
+        m.selectNext(); eq(m.selected, 1)
+        m.selectNext(); eq(m.selected, 0, "wrapped")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("selectPrev wraps around") {
+        var m = TabManager()   // 2 tabs, selected = 0
+        m.selectPrev(); eq(m.selected, 1, "wrapped to last")
+        m.selectPrev(); eq(m.selected, 0)
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("selectLast picks last index") {
+        var m = TabManager()
+        m.addTab(); m.addTab()   // 4 tabs
+        m.selectLast()
+        eq(m.selected, 3)
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("mixed add/close keeps arrays in sync") {
+        var m = TabManager()
+        for _ in 0..<5 { m.addTab() }
+        for _ in 0..<4 { m.closeSelected() }
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+}
+
+// MARK: - Entry point
+
+@main struct TestRunner {
+    static func main() {
+        runAll()
+
+        let bar = String(repeating: "─", count: 44)
+        print("TabManager Tests")
+        print(bar)
+        for name in names { print("  ✓ \(name)") }
+        print(bar)
+        if failures == 0 {
+            print("All \(passed) checks passed.")
+        } else {
+            print("\(failures) check(s) FAILED, \(passed) passed.")
+            exit(1)
+        }
+    }
+}
