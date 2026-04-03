@@ -147,7 +147,7 @@ private struct HelpOverlay: View {
             ("Rotate",           "Two-finger rotate"),
             ("Reset view",       "Double-click"),
         ]),
-        ("App", [
+        ("bzflipping", [
             ("Keyboard shortcuts", "⌘?"),
             ("Quit",               "⌘Q"),
         ]),
