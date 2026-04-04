@@ -131,6 +131,37 @@ private func runAll() {
         expect(m.isConsistent, "isConsistent")
     }
 
+    test("restoreLastClosed reopens closed tab") {
+        var m = TabManager()
+        m.addTab()                      // 3 tabs, selected = 2
+        m.names[2] = "Notes"            // give it a recognisable name
+        m.closeTab(at: 2)
+        eq(m.count, 2)
+        m.restoreLastClosed()
+        eq(m.count, 3, "restored")
+        eq(m.selected, 2, "selects restored tab")
+        eq(m.names[2], "Notes", "name preserved")
+        eq(m.names.count, m.contents.count, "in sync")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("restoreLastClosed is no-op when nothing closed") {
+        var m = TabManager()
+        m.restoreLastClosed()           // nothing to restore
+        eq(m.count, 2, "unchanged")
+        expect(m.isConsistent, "isConsistent")
+    }
+
+    test("canRestoreClosed reflects stack state") {
+        var m = TabManager()
+        expect(!m.canRestoreClosed, "empty initially")
+        m.addTab()
+        m.closeTab(at: 2)
+        expect(m.canRestoreClosed, "true after close")
+        m.restoreLastClosed()
+        expect(!m.canRestoreClosed, "empty after restore")
+    }
+
     test("mixed add/close keeps arrays in sync") {
         var m = TabManager()
         for _ in 0..<5 { m.addTab() }

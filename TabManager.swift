@@ -16,6 +16,7 @@ struct TabManager {
     var names: [String]
     var contents: [TabContent]
     var selected: Int
+    private var recentlyClosed: [(name: String, content: TabContent)] = []
 
     init(names: [String] = ["Tab 1", "Tab 2"]) {
         precondition(!names.isEmpty)
@@ -25,6 +26,7 @@ struct TabManager {
     }
 
     var count: Int { names.count }
+    var canRestoreClosed: Bool { !recentlyClosed.isEmpty }
 
     /// names.count == contents.count && selected is in bounds
     var isConsistent: Bool {
@@ -39,12 +41,21 @@ struct TabManager {
 
     mutating func closeTab(at index: Int) {
         guard names.count > 1, index >= 0, index < names.count else { return }
+        recentlyClosed.append((name: names[index], content: contents[index]))
+        if recentlyClosed.count > 10 { recentlyClosed.removeFirst() }
         names.remove(at: index)
         contents.remove(at: index)
         if selected >= names.count { selected = names.count - 1 }
     }
 
     mutating func closeSelected() { closeTab(at: selected) }
+
+    mutating func restoreLastClosed() {
+        guard let last = recentlyClosed.popLast() else { return }
+        names.append(last.name)
+        contents.append(last.content)
+        selected = names.count - 1
+    }
 
     mutating func selectNext() { selected = (selected + 1) % names.count }
 
