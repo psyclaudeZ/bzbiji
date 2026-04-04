@@ -1,0 +1,12 @@
+# Compiled binaries
+bzflipping
+NoteReviewer
+
+# App bundles
+*.app
+
+# Test runner artifact
+.test_runner
+
+# macOS
+.DS_Store
