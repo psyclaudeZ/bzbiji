@@ -132,8 +132,8 @@ private struct HelpOverlay: View {
             ("Close tab",        "⌘W"),
             ("Restore closed tab", "⌘⇧T"),
             ("Rename tab",       "⌘R"),
-            ("Next tab",         "⌘⇧D"),
-            ("Previous tab",     "⌘⇧A"),
+            ("Next tab",         "⌘⇧D  /  ⌘]"),
+            ("Previous tab",     "⌘⇧A  /  ⌘["),
             ("Switch to tab N",  "⌘1 – ⌘8"),
             ("Last tab",         "⌘9"),
         ]),
@@ -251,6 +251,10 @@ struct ContentView: View {
                         .keyboardShortcut("a", modifiers: [.command, .shift])
                     Button("") { tabs.selectNext() }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
+                    Button("") { tabs.selectPrev() }
+                        .keyboardShortcut("{", modifiers: .command)
+                    Button("") { tabs.selectNext() }
+                        .keyboardShortcut("}", modifiers: .command)
                     Button("") { helpState.isShowing.toggle() }
                         .keyboardShortcut("/", modifiers: .command)
                     Button("") { editingTab = tabs.selected }
