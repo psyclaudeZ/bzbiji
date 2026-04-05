@@ -4,20 +4,28 @@ import AppKit
 
 enum PaneContent {
     case empty
-    case markdown(content: String, fileName: String)
-    case image(image: NSImage, fileName: String)
+    case markdown(content: String, fileName: String, url: URL)
+    case image(image: NSImage, fileName: String, url: URL)
 
     var isEmpty: Bool { if case .empty = self { return true }; return false }
+
+    var sourceURL: URL? {
+        switch self {
+        case .empty:                         return nil
+        case .markdown(_, _, let url):       return url
+        case .image(_, _, let url):          return url
+        }
+    }
 
     /// Load from a file URL (md or image). Returns nil for unsupported types.
     init?(url: URL) {
         let ext = url.pathExtension.lowercased()
         if ["md", "markdown"].contains(ext) {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-            self = .markdown(content: text, fileName: url.lastPathComponent)
+            self = .markdown(content: text, fileName: url.lastPathComponent, url: url)
         } else if ["png","jpg","jpeg","webp","gif","tiff","heic"].contains(ext) {
             guard let img = NSImage(contentsOf: url) else { return nil }
-            self = .image(image: img, fileName: url.lastPathComponent)
+            self = .image(image: img, fileName: url.lastPathComponent, url: url)
         } else { return nil }
     }
 }
@@ -25,10 +33,10 @@ enum PaneContent {
 extension PaneContent: Equatable {
     static func == (lhs: PaneContent, rhs: PaneContent) -> Bool {
         switch (lhs, rhs) {
-        case (.empty, .empty):                              return true
-        case (.markdown(let a, _), .markdown(let b, _)):   return a == b
-        case (.image(let a, _), .image(let b, _)):         return a === b
-        default:                                            return false
+        case (.empty, .empty):                                  return true
+        case (.markdown(let a, _, _), .markdown(let b, _, _)): return a == b
+        case (.image(let a, _, _), .image(let b, _, _)):       return a === b
+        default:                                                return false
         }
     }
 }

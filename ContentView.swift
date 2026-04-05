@@ -1,5 +1,46 @@
 import SwiftUI
 
+// MARK: - State persistence
+
+private struct SavedState: Codable {
+    var tabNames: [String]
+    var tabPaneURLs: [[String?]]   // per-tab, per-pane; nil = empty pane
+    var selected: Int
+}
+
+private let stateKey = "bzflipping.savedState"
+
+private func saveTabState(_ tabs: TabManager) {
+    let state = SavedState(
+        tabNames: tabs.names,
+        tabPaneURLs: tabs.contents.map { tab in tab.panes.map { $0.sourceURL?.absoluteString } },
+        selected: tabs.selected
+    )
+    if let data = try? JSONEncoder().encode(state) {
+        UserDefaults.standard.set(data, forKey: stateKey)
+    }
+}
+
+private func restoreTabState() -> TabManager? {
+    guard let data = UserDefaults.standard.data(forKey: stateKey),
+          let state = try? JSONDecoder().decode(SavedState.self, from: data),
+          !state.tabNames.isEmpty else { return nil }
+
+    var manager = TabManager(names: state.tabNames)
+    manager.selected = min(state.selected, state.tabNames.count - 1)
+
+    for (i, urlStrings) in state.tabPaneURLs.enumerated() {
+        guard i < manager.contents.count else { break }
+        let panes: [PaneContent] = urlStrings.map { s in
+            guard let s, let url = URL(string: s) else { return .empty }
+            return PaneContent(url: url) ?? .empty
+        }
+        if !panes.isEmpty { manager.contents[i].panes = panes }
+    }
+
+    return manager
+}
+
 // MARK: - Tab bar
 
 private struct TabBar: View {
@@ -256,6 +297,12 @@ struct ContentView: View {
             if helpState.isShowing {
                 HelpOverlay(state: helpState)
             }
+        }
+        .onAppear {
+            if let restored = restoreTabState() { tabs = restored }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            saveTabState(tabs)
         }
     }
 }

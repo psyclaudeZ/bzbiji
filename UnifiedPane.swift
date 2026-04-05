@@ -303,14 +303,14 @@ class UnifiedPaneNSView: NSView {
             imageLayer.isHidden = true
             imageLayer.image = nil
             overlay.contentKind = .empty
-        case .markdown(let text, _):
+        case .markdown(let text, _, _):
             ensureWebView()
             webView?.isHidden = false
             imageLayer.isHidden = true
             imageLayer.image = nil
             overlay.contentKind = .markdown
             webView?.loadHTMLString(MarkdownConverter.toHTML(text), baseURL: nil)
-        case .image(let img, _):
+        case .image(let img, _, _):
             webView?.isHidden = true
             imageLayer.isHidden = false
             overlay.contentKind = .image
@@ -414,13 +414,13 @@ struct UnifiedPane: View {
         switch content {
         case .empty:
             EmptyView()
-        case .markdown(_, let name):
+        case .markdown(_, let name, _):
             Text(name)
                 .font(.caption2).foregroundColor(.secondary)
                 .padding(.horizontal, 7).padding(.vertical, 4)
                 .background(.regularMaterial).cornerRadius(4).padding(8)
                 .allowsHitTesting(false)
-        case .image(_, let name):
+        case .image(_, let name, _):
             VStack(alignment: .trailing, spacing: 3) {
                 Text(name).font(.caption2).foregroundColor(.secondary)
                 Text(String(format: "%.0f%%", scale * 100))
