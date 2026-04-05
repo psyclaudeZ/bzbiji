@@ -216,20 +216,8 @@ struct ContentView: View {
                 )
                 Divider()
 
-                HSplitView {
-                    MarkdownPane(
-                        markdownContent: $tabs.contents[tabs.selected].markdownContent,
-                        fileName: $tabs.contents[tabs.selected].markdownFileName
-                    )
-                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                    ImagePane(
-                        image: $tabs.contents[tabs.selected].image,
-                        fileName: $tabs.contents[tabs.selected].imageFileName,
-                        scale: $tabs.contents[tabs.selected].imageScale
-                    )
-                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TabPaneContainer(tab: $tabs.contents[tabs.selected])
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Hidden shortcut buttons

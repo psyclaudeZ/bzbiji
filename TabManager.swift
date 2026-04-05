@@ -1,13 +1,43 @@
 import AppKit
 
+// MARK: - Pane content
+
+enum PaneContent {
+    case empty
+    case markdown(content: String, fileName: String)
+    case image(image: NSImage, fileName: String)
+
+    var isEmpty: Bool { if case .empty = self { return true }; return false }
+
+    /// Load from a file URL (md or image). Returns nil for unsupported types.
+    init?(url: URL) {
+        let ext = url.pathExtension.lowercased()
+        if ["md", "markdown"].contains(ext) {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            self = .markdown(content: text, fileName: url.lastPathComponent)
+        } else if ["png","jpg","jpeg","webp","gif","tiff","heic"].contains(ext) {
+            guard let img = NSImage(contentsOf: url) else { return nil }
+            self = .image(image: img, fileName: url.lastPathComponent)
+        } else { return nil }
+    }
+}
+
+extension PaneContent: Equatable {
+    static func == (lhs: PaneContent, rhs: PaneContent) -> Bool {
+        switch (lhs, rhs) {
+        case (.empty, .empty):                              return true
+        case (.markdown(let a, _), .markdown(let b, _)):   return a == b
+        case (.image(let a, _), .image(let b, _)):         return a === b
+        default:                                            return false
+        }
+    }
+}
+
 // MARK: - Per-tab content
 
 struct TabContent {
-    var markdownContent: String? = nil
-    var markdownFileName: String? = nil
-    var image: NSImage? = nil
-    var imageFileName: String? = nil
-    var imageScale: CGFloat = 1.0
+    var panes: [PaneContent] = [.empty]
+    var isSplit: Bool { panes.count > 1 }
 }
 
 // MARK: - Tab manager (owns all mutable tab state; fully testable)
@@ -58,8 +88,6 @@ struct TabManager {
     }
 
     mutating func selectNext() { selected = (selected + 1) % names.count }
-
     mutating func selectPrev() { selected = selected == 0 ? names.count - 1 : selected - 1 }
-
     mutating func selectLast() { selected = names.count - 1 }
 }
