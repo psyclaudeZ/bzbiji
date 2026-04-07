@@ -8,7 +8,7 @@ private struct SavedState: Codable {
     var selected: Int
 }
 
-private let stateKey = "bzflipping.savedState"
+private let stateKey = "bzbiji.savedState"
 
 private func saveTabState(_ tabs: TabManager) {
     let state = SavedState(
@@ -184,7 +184,7 @@ private struct HelpOverlay: View {
             ("Rotate",           "Two-finger rotate"),
             ("Reset view",       "Double-click"),
         ]),
-        ("bzflipping", [
+        ("bzbiji", [
             ("File browser",       "⌘B"),
             ("Keyboard shortcuts", "⌘?"),
             ("Quit",               "⌘Q"),
