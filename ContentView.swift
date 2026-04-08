@@ -185,7 +185,8 @@ private struct HelpOverlay: View {
             ("Reset view",       "Double-click"),
         ]),
         ("bzbiji", [
-            ("File browser",       "⌘B"),
+            ("Open file",          "⌘O"),
+            ("Open to the right",  "⌘\\"),
             ("Keyboard shortcuts", "⌘?"),
             ("Quit",               "⌘Q"),
         ]),
@@ -245,6 +246,26 @@ struct ContentView: View {
     @State private var editingTab: Int? = nil
     @StateObject private var helpState = HelpState()
 
+    private func openFile(side: DropSide = .center) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let content = PaneContent(url: url) else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            switch side {
+            case .center:
+                tabs.contents[tabs.selected].panes[0] = content
+            case .right:
+                tabs.contents[tabs.selected].panes.append(content)
+            case .left:
+                tabs.contents[tabs.selected].panes.insert(content, at: 0)
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -290,6 +311,10 @@ struct ContentView: View {
                         .keyboardShortcut("r", modifiers: .command)
                     Button("") { tabs.restoreLastClosed() }
                         .keyboardShortcut("t", modifiers: [.command, .shift])
+                    Button("") { openFile(side: .center) }
+                        .keyboardShortcut("o", modifiers: .command)
+                    Button("") { openFile(side: .right) }
+                        .keyboardShortcut("\\", modifiers: .command)
                 }
                 .opacity(0).frame(width: 0, height: 0).clipped()
             )
