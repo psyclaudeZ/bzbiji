@@ -56,9 +56,15 @@ private class PaneOverlay: NSView {
     private var isDragTarget = false
     private var dragSide: DropSide? = nil
 
+    // Global focus tracking — bypasses SwiftUI for instant visual update
+    private static weak var activeFocusOverlay: PaneOverlay?
+
     // Callbacks
     var onDrop: ((URL, DropSide) -> Void)?
     var onScaleChange: ((CGFloat) -> Void)?
+    var onFocus: (() -> Void)?
+
+    var isFocused: Bool = false { didSet { if oldValue != isFocused { needsDisplay = true } } }
 
     override var isOpaque: Bool { false }
 
@@ -83,6 +89,25 @@ private class PaneOverlay: NSView {
         ))
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: Focus
+
+    override func mouseDown(with event: NSEvent) {
+        // FIXME: focus border on click is visually sluggish (~100ms+).
+        // Direct display() calls and deferred SwiftUI sync don't help.
+        // Suspected cause: something upstream (gesture recognizers? AppKit event dispatch?
+        // compositor scheduling?) is delaying the repaint despite display() being called.
+        // Arrow key focus (pure SwiftUI path) is fast — investigate why mouse is different.
+        if PaneOverlay.activeFocusOverlay !== self {
+            PaneOverlay.activeFocusOverlay?.isFocused = false
+            PaneOverlay.activeFocusOverlay?.display()
+            PaneOverlay.activeFocusOverlay = self
+            isFocused = true
+            display()
+        }
+        DispatchQueue.main.async { self.onFocus?() }
+        super.mouseDown(with: event)
+    }
 
     // MARK: Transform
 
@@ -219,39 +244,45 @@ private class PaneOverlay: NSView {
     // MARK: Drawing (indicator only; transparent otherwise)
 
     override func draw(_ dirtyRect: NSRect) {
-        guard isDragTarget else { return }
+        if isDragTarget {
+            let half = bounds.width / 2
 
-        let half = bounds.width / 2
+            if let side = dragSide {
+                let highlight: NSRect
+                switch side {
+                case .left:   highlight = NSRect(x: 0,    y: 0, width: half, height: bounds.height)
+                case .right:  highlight = NSRect(x: half, y: 0, width: half, height: bounds.height)
+                case .center: highlight = bounds
+                }
+                NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
+                highlight.fill()
 
-        if let side = dragSide {
-            let highlight: NSRect
-            switch side {
-            case .left:   highlight = NSRect(x: 0,    y: 0, width: half, height: bounds.height)
-            case .right:  highlight = NSRect(x: half, y: 0, width: half, height: bounds.height)
-            case .center: highlight = bounds
+                if side != .center {
+                    NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+                    let divider = NSBezierPath()
+                    divider.move(to: NSPoint(x: half, y: 0))
+                    divider.line(to: NSPoint(x: half, y: bounds.height))
+                    divider.lineWidth = 2
+                    divider.stroke()
+                }
+            } else {
+                // Empty pane: full highlight
+                NSColor.controlAccentColor.withAlphaComponent(0.15).setFill()
+                bounds.fill()
             }
-            NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
-            highlight.fill()
 
-            if side != .center {
-                NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
-                let divider = NSBezierPath()
-                divider.move(to: NSPoint(x: half, y: 0))
-                divider.line(to: NSPoint(x: half, y: bounds.height))
-                divider.lineWidth = 2
-                divider.stroke()
-            }
-        } else {
-            // Empty pane: full highlight
-            NSColor.controlAccentColor.withAlphaComponent(0.15).setFill()
-            bounds.fill()
+            // Outer drag border
+            NSColor.controlAccentColor.setStroke()
+            let border = NSBezierPath(rect: bounds.insetBy(dx: 1.5, dy: 1.5))
+            border.lineWidth = 3
+            border.stroke()
+        } else if isFocused {
+            // Focus border
+            NSColor.controlAccentColor.withAlphaComponent(0.9).setStroke()
+            let focusBorder = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
+            focusBorder.lineWidth = 2
+            focusBorder.stroke()
         }
-
-        // Outer border
-        NSColor.controlAccentColor.setStroke()
-        let border = NSBezierPath(rect: bounds.insetBy(dx: 1.5, dy: 1.5))
-        border.lineWidth = 3
-        border.stroke()
     }
 }
 
@@ -326,8 +357,10 @@ class UnifiedPaneNSView: NSView {
 struct UnifiedPaneRepresentable: NSViewRepresentable {
     @Binding var content: PaneContent
     var isSplit: Bool
+    var isFocused: Bool
     var onDrop: (URL, DropSide) -> Void
     var onScaleChange: (CGFloat) -> Void
+    var onFocus: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -346,6 +379,7 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
         context.coordinator.parent = self
         attach(v, to: context.coordinator)
         v.overlay.isSplit = isSplit
+        v.overlay.isFocused = isFocused
         if v.currentContent != content { v.setContent(content) }
     }
 
@@ -356,6 +390,7 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
         v.overlay.onScaleChange = { s in
             DispatchQueue.main.async { coordinator.parent.onScaleChange(s) }
         }
+        v.overlay.onFocus = { coordinator.parent.onFocus() }
     }
 }
 
@@ -364,7 +399,9 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
 struct UnifiedPane: View {
     @Binding var content: PaneContent
     var isSplit: Bool
+    var isFocused: Bool
     var onDrop: (URL, DropSide) -> Void
+    var onFocus: () -> Void
     var onClose: (() -> Void)?
 
     @State private var scale: CGFloat = 1
@@ -376,8 +413,10 @@ struct UnifiedPane: View {
             UnifiedPaneRepresentable(
                 content: $content,
                 isSplit: isSplit,
+                isFocused: isFocused,
                 onDrop: onDrop,
-                onScaleChange: { scale = $0 }
+                onScaleChange: { scale = $0 },
+                onFocus: onFocus
             )
 
             if case .empty = content { placeholder }
@@ -444,7 +483,9 @@ struct TabPaneContainer: View {
                 UnifiedPane(
                     content: $tab.panes[i],
                     isSplit: tab.isSplit,
+                    isFocused: tab.focusedPane == i,
                     onDrop: { url, side in handleDrop(url: url, paneIndex: i, side: side) },
+                    onFocus: { tab.focusedPane = i },
                     onClose: tab.isSplit ? { closePane(at: i) } : nil
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -463,10 +504,13 @@ struct TabPaneContainer: View {
             switch side {
             case .center:
                 tab.panes[paneIndex] = newContent
+                tab.focusedPane = paneIndex
             case .left:
                 tab.panes.insert(newContent, at: paneIndex)
+                tab.focusedPane = paneIndex
             case .right:
                 tab.panes.insert(newContent, at: paneIndex + 1)
+                tab.focusedPane = paneIndex + 1
             }
         }
     }
@@ -475,6 +519,7 @@ struct TabPaneContainer: View {
         guard tab.panes.count > 1 else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             _ = tab.panes.remove(at: index)
+            tab.clampFocus()
         }
     }
 }

@@ -246,7 +246,13 @@ struct ContentView: View {
     @State private var editingTab: Int? = nil
     @StateObject private var helpState = HelpState()
 
-    private func openFile(side: DropSide = .center) {
+    private func moveFocus(_ delta: Int) {
+        let tab = tabs.contents[tabs.selected]
+        let next = min(max(tab.focusedPane + delta, 0), tab.panes.count - 1)
+        tabs.contents[tabs.selected].focusedPane = next
+    }
+
+    private func openFile() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -254,15 +260,9 @@ struct ContentView: View {
         guard panel.runModal() == .OK,
               let url = panel.url,
               let content = PaneContent(url: url) else { return }
+        let focused = tabs.contents[tabs.selected].focusedPane
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            switch side {
-            case .center:
-                tabs.contents[tabs.selected].panes[0] = content
-            case .right:
-                tabs.contents[tabs.selected].panes.append(content)
-            case .left:
-                tabs.contents[tabs.selected].panes.insert(content, at: 0)
-            }
+            tabs.contents[tabs.selected].panes[focused] = content
         }
     }
 
@@ -311,10 +311,21 @@ struct ContentView: View {
                         .keyboardShortcut("r", modifiers: .command)
                     Button("") { tabs.restoreLastClosed() }
                         .keyboardShortcut("t", modifiers: [.command, .shift])
-                    Button("") { openFile(side: .center) }
+                    Button("") { moveFocus(-1) }
+                        .keyboardShortcut(.leftArrow, modifiers: [])
+                    Button("") { moveFocus(1) }
+                        .keyboardShortcut(.rightArrow, modifiers: [])
+                    Button("") { openFile() }
                         .keyboardShortcut("o", modifiers: .command)
-                    Button("") { openFile(side: .right) }
-                        .keyboardShortcut("\\", modifiers: .command)
+                    Button("") {
+                        let focused = tabs.contents[tabs.selected].focusedPane
+                        let insertAt = focused + 1
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            tabs.contents[tabs.selected].panes.insert(.empty, at: insertAt)
+                            tabs.contents[tabs.selected].focusedPane = insertAt
+                        }
+                    }
+                    .keyboardShortcut("\\", modifiers: .command)
                 }
                 .opacity(0).frame(width: 0, height: 0).clipped()
             )

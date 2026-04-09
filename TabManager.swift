@@ -45,7 +45,12 @@ extension PaneContent: Equatable {
 
 struct TabContent {
     var panes: [PaneContent] = [.empty]
+    var focusedPane: Int = 0
     var isSplit: Bool { panes.count > 1 }
+
+    mutating func clampFocus() {
+        focusedPane = min(focusedPane, panes.count - 1)
+    }
 }
 
 // MARK: - Tab manager (owns all mutable tab state; fully testable)
