@@ -295,8 +295,19 @@ struct ContentView: View {
                         .keyboardShortcut("9", modifiers: .command)
                     Button("") { tabs.addTab() }
                         .keyboardShortcut("t", modifiers: .command)
-                    Button("") { tabs.closeSelected() }
-                        .keyboardShortcut("w", modifiers: .command)
+                    Button("") {
+                        let sel = tabs.selected
+                        if tabs.contents[sel].panes.count > 1 {
+                            let focused = tabs.contents[sel].focusedPane
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                tabs.contents[sel].panes.remove(at: focused)
+                                tabs.contents[sel].clampFocus()
+                            }
+                        } else {
+                            tabs.closeSelected()
+                        }
+                    }
+                    .keyboardShortcut("w", modifiers: .command)
                     Button("") { tabs.selectPrev() }
                         .keyboardShortcut("a", modifiers: [.command, .shift])
                     Button("") { tabs.selectNext() }
