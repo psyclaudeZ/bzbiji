@@ -64,7 +64,86 @@ private class PaneOverlay: NSView {
     var onScaleChange: ((CGFloat) -> Void)?
     var onFocus: (() -> Void)?
 
-    var isFocused: Bool = false { didSet { if oldValue != isFocused { needsDisplay = true } } }
+    var isFocused: Bool = false {
+        didSet {
+            guard oldValue != isFocused else { return }
+            needsDisplay = true
+            if isFocused { registerKeyMonitor() } else { unregisterKeyMonitor() }
+        }
+    }
+
+    private var keyMonitor: Any?
+    private var lastKey: String = ""
+
+    private func registerKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.isFocused else { return event }
+            if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+            // Primary use: scrolling markdown documents. Images follow as side-effect.
+            let key = event.charactersIgnoringModifiers ?? ""
+            let line: CGFloat = 60
+            switch key {
+            case "j": self.vimScroll(dx: 0,    dy:  line); self.lastKey = key; return nil
+            case "k": self.vimScroll(dx: 0,    dy: -line); self.lastKey = key; return nil
+            case "h": self.vimScroll(dx: -line, dy: 0);    self.lastKey = key; return nil
+            case "l": self.vimScroll(dx:  line, dy: 0);    self.lastKey = key; return nil
+            case "d": self.vimScrollHalfPage(down: true);  self.lastKey = key; return nil
+            case "u": self.vimScrollHalfPage(down: false); self.lastKey = key; return nil
+            case "G": self.vimScrollEdge(bottom: true);    self.lastKey = key; return nil
+            case "g":
+                if self.lastKey == "g" { self.vimScrollEdge(bottom: false); self.lastKey = "" }
+                else                   { self.lastKey = key }
+                return nil
+            default:  self.lastKey = key; return event
+            }
+        }
+    }
+
+    private func unregisterKeyMonitor() {
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+    }
+
+    deinit { unregisterKeyMonitor() }
+
+    private func vimScrollHalfPage(down: Bool) {
+        switch contentKind {
+        case .markdown:
+            let dir = down ? "" : "-"
+            webView?.evaluateJavaScript("window.scrollBy(0, \(dir)window.innerHeight / 2)", completionHandler: nil)
+        case .image:
+            let dy = (down ? -1 : 1) * bounds.height / 2
+            imgTranslation.y += dy
+            pushImageTransform()
+        case .empty: break
+        }
+    }
+
+    private func vimScrollEdge(bottom: Bool) {
+        switch contentKind {
+        case .markdown:
+            let js = bottom ? "window.scrollTo(0, document.body.scrollHeight)"
+                            : "window.scrollTo(0, 0)"
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+        case .image:
+            imgTranslation.y = bottom ? -(bounds.height / 2) : (bounds.height / 2)
+            pushImageTransform()
+        case .empty: break
+        }
+    }
+
+    private func vimScroll(dx: CGFloat, dy: CGFloat) {
+        switch contentKind {
+        case .markdown:
+            webView?.evaluateJavaScript("window.scrollBy(\(dx), \(dy))", completionHandler: nil)
+        case .image:
+            imgTranslation.x += dx
+            imgTranslation.y -= dy   // AppKit y-up, so invert
+            pushImageTransform()
+        case .empty:
+            break
+        }
+    }
 
     override var isOpaque: Bool { false }
 

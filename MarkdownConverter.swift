@@ -186,6 +186,7 @@ enum MarkdownConverter {
         <style>
         :root { color-scheme: light dark; }
         * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
             font-size: 15px;
