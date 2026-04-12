@@ -82,6 +82,17 @@ private class PaneOverlay: NSView {
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
             // Primary use: scrolling markdown documents. Images follow as side-effect.
             let key = event.charactersIgnoringModifiers ?? ""
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // ⌘+/⌘-/⌘0 zoom (image only)
+            if mods == .command && self.contentKind == .image {
+                let center = CGPoint(x: self.bounds.midX, y: self.bounds.midY)
+                switch key {
+                case "=", "+": self.zoomToward(center, factor: 1.25); return nil
+                case "-":      self.zoomToward(center, factor: 0.8);  return nil
+                case "0":      self.resetImageTransform();             return nil
+                default: break
+                }
+            }
             let line: CGFloat = 60
             switch key {
             case "j": self.vimScroll(dx: 0,    dy:  line); self.lastKey = key; return nil
@@ -137,8 +148,8 @@ private class PaneOverlay: NSView {
         case .markdown:
             webView?.evaluateJavaScript("window.scrollBy(\(dx), \(dy))", completionHandler: nil)
         case .image:
-            imgTranslation.x += dx
-            imgTranslation.y -= dy   // AppKit y-up, so invert
+            imgTranslation.x -= dx
+            imgTranslation.y += dy
             pushImageTransform()
         case .empty:
             break
