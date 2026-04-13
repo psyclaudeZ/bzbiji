@@ -366,8 +366,8 @@ private class PaneOverlay: NSView {
             let border = NSBezierPath(rect: bounds.insetBy(dx: 1.5, dy: 1.5))
             border.lineWidth = 3
             border.stroke()
-        } else if isFocused {
-            // Focus border
+        } else if isFocused && isSplit {
+            // Focus border — only shown when multiple panes exist
             NSColor.controlAccentColor.withAlphaComponent(0.9).setStroke()
             let focusBorder = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
             focusBorder.lineWidth = 2
