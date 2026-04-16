@@ -79,20 +79,32 @@ private class PaneOverlay: NSView {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.isFocused else { return event }
-            if NSApp.keyWindow?.firstResponder is NSTextView { return event }
-            // Primary use: scrolling markdown documents. Images follow as side-effect.
             let key = event.charactersIgnoringModifiers ?? ""
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            // ⌘+/⌘-/⌘0 zoom (image only)
-            if mods == .command && self.contentKind == .image {
+            // ⌘+/⌘-/⌘0 zoom — handled before NSTextView guard so WKWebView's internal
+            // text responder doesn't swallow these events.
+            if mods.contains(.command) {
                 let center = CGPoint(x: self.bounds.midX, y: self.bounds.midY)
-                switch key {
-                case "=", "+": self.zoomToward(center, factor: 1.25); return nil
-                case "-":      self.zoomToward(center, factor: 0.8);  return nil
-                case "0":      self.resetImageTransform();             return nil
-                default: break
+                switch self.contentKind {
+                case .image:
+                    switch key {
+                    case "=", "+": self.zoomToward(center, factor: 1.25); return nil
+                    case "-":      self.zoomToward(center, factor: 0.8);  return nil
+                    case "0":      self.resetImageTransform();             return nil
+                    default: break
+                    }
+                case .markdown:
+                    switch key {
+                    case "=", "+": self.mdZoomBy(1.25); return nil
+                    case "-":      self.mdZoomBy(0.8);  return nil
+                    case "0":      self.mdZoomReset();  return nil
+                    default: break
+                    }
+                case .empty: break
                 }
             }
+            // Vim motions: bail if an actual text-editing field (e.g. tab rename) is active.
+            if NSApp.keyWindow?.firstResponder is NSTextView { return event }
             let line: CGFloat = 60
             switch key {
             case "j": self.vimScroll(dx: 0,    dy:  line); self.lastKey = key; return nil
@@ -200,6 +212,18 @@ private class PaneOverlay: NSView {
     }
 
     // MARK: Transform
+
+    private var mdZoom: CGFloat = 1.0
+
+    private func mdZoomBy(_ factor: CGFloat) {
+        mdZoom = max(0.25, min(4.0, mdZoom * factor))
+        webView?.pageZoom = mdZoom
+    }
+
+    func mdZoomReset() {
+        mdZoom = 1.0
+        webView?.pageZoom = 1.0
+    }
 
     func resetImageTransform() {
         imgScale = 1; imgRotation = 0; imgTranslation = .zero
@@ -430,6 +454,7 @@ class UnifiedPaneNSView: NSView {
             imageLayer.isHidden = true
             imageLayer.image = nil
             overlay.contentKind = .markdown
+            overlay.mdZoomReset()
             webView?.loadHTMLString(MarkdownConverter.toHTML(text), baseURL: nil)
         case .image(let img, _, _):
             webView?.isHidden = true
