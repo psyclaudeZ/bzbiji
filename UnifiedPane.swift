@@ -35,6 +35,110 @@ private class ImageLayerView: NSView {
     }
 }
 
+// MARK: - Search bar
+
+private class SearchField: NSTextField {
+    var onEscape: (() -> Void)?
+    override func cancelOperation(_ sender: Any?) { onEscape?() }
+}
+
+private class SearchBarView: NSView, NSTextFieldDelegate {
+    private let field = SearchField()
+    private let countLabel = NSTextField(labelWithString: "")
+    var onQueryChange: ((String) -> Void)?
+    var onNext: (() -> Void)?
+    var onPrev: (() -> Void)?
+    var onClose: (() -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.borderWidth = 1
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.3
+        layer?.shadowRadius = 10
+        layer?.shadowOffset = CGSize(width: 0, height: -3)
+
+        field.placeholderString = "Search…"
+        field.controlSize = .regular
+        field.font = .systemFont(ofSize: 13)
+        field.focusRingType = .none
+        field.isBordered = false
+        field.drawsBackground = false
+        field.delegate = self
+        field.onEscape = { [weak self] in self?.onClose?() }
+        field.translatesAutoresizingMaskIntoConstraints = false
+
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        countLabel.textColor = .secondaryLabelColor
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let prevBtn = makeArrowButton(systemName: "chevron.up", action: #selector(didPrev))
+        let nextBtn = makeArrowButton(systemName: "chevron.down", action: #selector(didNext))
+        let closeBtn = makeArrowButton(systemName: "xmark", action: #selector(didClose))
+
+        let stack = NSStackView(views: [field, countLabel, prevBtn, nextBtn, closeBtn])
+        stack.orientation = .horizontal
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 8)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func makeArrowButton(systemName: String, action: Selector) -> NSButton {
+        let btn = NSButton()
+        btn.image = NSImage(systemSymbolName: systemName, accessibilityDescription: nil)
+        btn.bezelStyle = .regularSquare
+        btn.isBordered = false
+        btn.target = self
+        btn.action = action
+        btn.contentTintColor = .secondaryLabelColor
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            btn.widthAnchor.constraint(equalToConstant: 22),
+            btn.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        return btn
+    }
+
+    func focusField() { window?.makeFirstResponder(field) }
+
+    func updateCount(found: Bool, query: String) {
+        countLabel.stringValue = query.isEmpty ? "" : (found ? "" : "No results")
+    }
+
+    // NSTextFieldDelegate
+    func controlTextDidChange(_ obj: Notification) {
+        onQueryChange?(field.stringValue)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:))    { onNext?();  return true }
+        if selector == #selector(NSResponder.cancelOperation(_:))  { onClose?(); return true }
+        if selector == #selector(NSResponder.moveUp(_:))           { onPrev?();  return true }
+        if selector == #selector(NSResponder.moveDown(_:))         { onNext?();  return true }
+        return false
+    }
+
+    @objc private func didPrev()  { onPrev?() }
+    @objc private func didNext()  { onNext?() }
+    @objc private func didClose() { onClose?() }
+
+    override func cancelOperation(_ sender: Any?) { onClose?() }
+}
+
 // MARK: - Interaction overlay (sits on top: handles drag, gestures, draw indicator)
 
 private class PaneOverlay: NSView {
@@ -81,6 +185,12 @@ private class PaneOverlay: NSView {
             guard let self, self.isFocused else { return event }
             let key = event.charactersIgnoringModifiers ?? ""
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // Escape closes the search bar if open (handled before NSTextView guard
+            // because WKWebView's internal responder IS an NSTextView subclass).
+            if event.keyCode == 53, self.searchBar != nil {
+                self.hideSearch()
+                return nil
+            }
             // ⌘+/⌘-/⌘0 zoom — handled before NSTextView guard so WKWebView's internal
             // text responder doesn't swallow these events.
             if mods.contains(.command) {
@@ -98,6 +208,7 @@ private class PaneOverlay: NSView {
                     case "=", "+": self.mdZoomBy(1.25); return nil
                     case "-":      self.mdZoomBy(0.8);  return nil
                     case "0":      self.mdZoomReset();  return nil
+                    case "f":      self.showSearch();   return nil
                     default: break
                     }
                 case .empty: break
@@ -209,6 +320,67 @@ private class PaneOverlay: NSView {
         }
         DispatchQueue.main.async { self.onFocus?() }
         super.mouseDown(with: event)
+    }
+
+    // MARK: Search
+
+    private var searchBar: SearchBarView?
+    private var lastSearchQuery = ""
+
+    func showSearch() {
+        guard contentKind == .markdown else { return }
+        if searchBar == nil {
+            let bar = SearchBarView(frame: .zero)
+            bar.onQueryChange = { [weak self] q in self?.performSearch(q, backwards: false) }
+            bar.onNext  = { [weak self] in self?.performSearch(self?.lastSearchQuery ?? "", backwards: false) }
+            bar.onPrev  = { [weak self] in self?.performSearch(self?.lastSearchQuery ?? "", backwards: true) }
+            bar.onClose = { [weak self] in self?.hideSearch() }
+            addSubview(bar)
+            searchBar = bar
+        }
+        layoutSearchBar()
+        // Defer focus so cmd+f keyUp events don't leak an "f" into the field.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.searchBar?.focusField()
+        }
+    }
+
+    func hideSearch() {
+        window?.makeFirstResponder(self)
+        searchBar?.removeFromSuperview()
+        searchBar = nil
+        lastSearchQuery = ""
+        if #available(macOS 12, *) {
+            webView?.find("", configuration: WKFindConfiguration()) { _ in }
+        }
+    }
+
+    private func layoutSearchBar() {
+        guard let bar = searchBar else { return }
+        let w: CGFloat = 340, h: CGFloat = 42
+        bar.frame = CGRect(x: bounds.width - w - 16, y: bounds.height - h - 12, width: w, height: h)
+    }
+
+    override func layout() {
+        super.layout()
+        layoutSearchBar()
+    }
+
+    private func performSearch(_ query: String, backwards: Bool) {
+        lastSearchQuery = query
+        guard #available(macOS 12, *), let wv = webView else { return }
+        if query.isEmpty {
+            wv.find("", configuration: WKFindConfiguration()) { _ in }
+            searchBar?.updateCount(found: true, query: "")
+            return
+        }
+        let config = WKFindConfiguration()
+        config.backwards = backwards
+        config.wraps = true
+        config.caseSensitive = false
+        wv.find(query, configuration: config) { [weak self] result in
+            self?.searchBar?.updateCount(found: result.matchFound, query: query)
+        }
     }
 
     // MARK: Transform
