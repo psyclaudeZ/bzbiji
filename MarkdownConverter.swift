@@ -243,9 +243,89 @@ enum MarkdownConverter {
         th, td { border: 1px solid rgba(0,0,0,0.12); padding: 7px 12px; text-align: left; }
         th { background: rgba(0,0,0,0.04); font-weight: 600; }
         tr:nth-child(even) td { background: rgba(0,0,0,0.02); }
+        mark.bzbiji-hit {
+            background: rgba(255, 213, 79, 0.75);
+            color: #1a1a1a;
+            border-radius: 3px;
+            padding: 1px 2px;
+            box-shadow: 0 0 0 1px rgba(200, 140, 0, 0.45);
+        }
+        mark.bzbiji-hit-current {
+            background: #ff9500;
+            color: #000;
+            box-shadow: 0 0 0 2px #ff9500, 0 0 10px 2px rgba(255, 149, 0, 0.85);
+        }
+        @media (prefers-color-scheme: dark) {
+            mark.bzbiji-hit { background: rgba(255, 200, 70, 0.55); color: #1a1a1a; }
+            mark.bzbiji-hit-current { background: #ffb020; color: #000; box-shadow: 0 0 0 2px #ffb020, 0 0 12px 3px rgba(255, 176, 32, 0.9); }
+        }
         </style>
         </head>
-        <body>\(body)</body>
+        <body>\(body)
+        <script>
+        (function(){
+          var hits = [], curr = -1, lastQ = null;
+          function clear() {
+            hits.forEach(function(m){
+              var p = m.parentNode;
+              if (p) { p.replaceChild(document.createTextNode(m.textContent), m); p.normalize(); }
+            });
+            hits = []; curr = -1; lastQ = null;
+          }
+          function showCurrent() {
+            hits.forEach(function(h, i){ h.classList.toggle('bzbiji-hit-current', i === curr); });
+            var h = hits[curr];
+            if (h) h.scrollIntoView({block:'center', behavior:'smooth'});
+          }
+          window.__bzbijiClearHits = clear;
+          window.__bzbijiSearch = function(q, dir) {
+            if (lastQ === q && hits.length) {
+              curr = (curr + dir + hits.length) % hits.length;
+              showCurrent();
+              return hits.length;
+            }
+            clear();
+            if (!q) return 0;
+            lastQ = q;
+            var qq = q.toLowerCase();
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+              acceptNode: function(n) {
+                var t = n.parentNode && n.parentNode.nodeName;
+                if (t === 'SCRIPT' || t === 'STYLE' || t === 'MARK') return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            });
+            var nodes = [], n;
+            while ((n = walker.nextNode())) nodes.push(n);
+            nodes.forEach(function(node){
+              var text = node.nodeValue;
+              var lower = text.toLowerCase();
+              var pos = 0, idx, had = false;
+              var frag = document.createDocumentFragment();
+              while ((idx = lower.indexOf(qq, pos)) !== -1) {
+                if (idx > pos) frag.appendChild(document.createTextNode(text.slice(pos, idx)));
+                var m = document.createElement('mark');
+                m.className = 'bzbiji-hit';
+                m.textContent = text.slice(idx, idx + qq.length);
+                frag.appendChild(m);
+                hits.push(m);
+                pos = idx + qq.length;
+                had = true;
+              }
+              if (had) {
+                if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+                node.parentNode.replaceChild(frag, node);
+              }
+            });
+            if (hits.length) {
+              curr = dir >= 0 ? 0 : hits.length - 1;
+              showCurrent();
+            }
+            return hits.length;
+          };
+        })();
+        </script>
+        </body>
         </html>
         """
     }

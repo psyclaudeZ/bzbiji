@@ -350,9 +350,8 @@ private class PaneOverlay: NSView {
         searchBar?.removeFromSuperview()
         searchBar = nil
         lastSearchQuery = ""
-        if #available(macOS 12, *) {
-            webView?.find("", configuration: WKFindConfiguration()) { _ in }
-        }
+        webView?.evaluateJavaScript("window.__bzbijiClearHits && window.__bzbijiClearHits()",
+                                    completionHandler: nil)
     }
 
     private func layoutSearchBar() {
@@ -368,18 +367,20 @@ private class PaneOverlay: NSView {
 
     private func performSearch(_ query: String, backwards: Bool) {
         lastSearchQuery = query
-        guard #available(macOS 12, *), let wv = webView else { return }
+        guard let wv = webView else { return }
         if query.isEmpty {
-            wv.find("", configuration: WKFindConfiguration()) { _ in }
+            wv.evaluateJavaScript("window.__bzbijiClearHits && window.__bzbijiClearHits()",
+                                  completionHandler: nil)
             searchBar?.updateCount(found: true, query: "")
             return
         }
-        let config = WKFindConfiguration()
-        config.backwards = backwards
-        config.wraps = true
-        config.caseSensitive = false
-        wv.find(query, configuration: config) { [weak self] result in
-            self?.searchBar?.updateCount(found: result.matchFound, query: query)
+        let queryJSON = (try? JSONEncoder().encode(query))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        let dir = backwards ? -1 : 1
+        let js = "window.__bzbijiSearch ? window.__bzbijiSearch(\(queryJSON), \(dir)) : 0"
+        wv.evaluateJavaScript(js) { [weak self] result, _ in
+            let count = (result as? Int) ?? 0
+            self?.searchBar?.updateCount(found: count > 0, query: query)
         }
     }
 
