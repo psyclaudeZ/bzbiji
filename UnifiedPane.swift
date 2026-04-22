@@ -6,6 +6,28 @@ import WebKit
 
 enum DropSide { case left, center, right }
 
+// MARK: - Persistent markdown zoom (shared across all panes and launches)
+
+private extension Notification.Name {
+    static let bzbijiMdZoomChanged = Notification.Name("bzbiji.mdZoomChanged")
+}
+
+private enum MdZoomStore {
+    static let key = "bzbiji.mdZoom"
+    static let min: CGFloat = 0.25
+    static let max: CGFloat = 4.0
+
+    static func load() -> CGFloat {
+        let v = UserDefaults.standard.double(forKey: key)
+        return (v >= Double(min) && v <= Double(max)) ? CGFloat(v) : 1.0
+    }
+
+    static func save(_ v: CGFloat) {
+        UserDefaults.standard.set(Double(v), forKey: key)
+        NotificationCenter.default.post(name: .bzbijiMdZoomChanged, object: v)
+    }
+}
+
 // MARK: - Image drawing layer (pure rendering, no event handling)
 
 private class ImageLayerView: NSView {
@@ -300,6 +322,14 @@ private class PaneOverlay: NSView {
             options: [.activeInKeyWindow, .cursorUpdate, .mouseEnteredAndExited, .inVisibleRect],
             owner: self, userInfo: nil
         ))
+
+        NotificationCenter.default.addObserver(
+            forName: .bzbijiMdZoomChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let v = note.object as? CGFloat, v != self.mdZoom else { return }
+            self.mdZoom = v
+            self.webView?.pageZoom = v
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -386,17 +416,21 @@ private class PaneOverlay: NSView {
 
     // MARK: Transform
 
-    private var mdZoom: CGFloat = 1.0
+    private var mdZoom: CGFloat = MdZoomStore.load()
 
     private func mdZoomBy(_ factor: CGFloat) {
-        mdZoom = max(0.25, min(4.0, mdZoom * factor))
+        mdZoom = Swift.max(MdZoomStore.min, Swift.min(MdZoomStore.max, mdZoom * factor))
         webView?.pageZoom = mdZoom
+        MdZoomStore.save(mdZoom)
     }
 
     func mdZoomReset() {
         mdZoom = 1.0
         webView?.pageZoom = 1.0
+        MdZoomStore.save(1.0)
     }
+
+    func applyMdZoom() { webView?.pageZoom = mdZoom }
 
     func resetImageTransform() {
         imgScale = 1; imgRotation = 0; imgTranslation = .zero
@@ -627,7 +661,7 @@ class UnifiedPaneNSView: NSView {
             imageLayer.isHidden = true
             imageLayer.image = nil
             overlay.contentKind = .markdown
-            overlay.mdZoomReset()
+            overlay.applyMdZoom()
             webView?.loadHTMLString(MarkdownConverter.toHTML(text), baseURL: nil)
         case .image(let img, _, _):
             webView?.isHidden = true
