@@ -616,6 +616,12 @@ class UnifiedPaneNSView: NSView {
 
     private(set) var currentContent: PaneContent = .empty
 
+    // File watching (markdown only)
+    private var fileSource: DispatchSourceFileSystemObject?
+    private var watchedURL: URL?
+    private var pollTimer: Timer?
+    var onContentReload: ((PaneContent) -> Void)?
+
     override init(frame: NSRect) {
         imageLayer = ImageLayerView(frame: .zero)
         overlay = PaneOverlay(frame: .zero)
@@ -632,6 +638,8 @@ class UnifiedPaneNSView: NSView {
 
         overlay.imageLayer = imageLayer
     }
+
+    deinit { stopWatching() }
 
     private func ensureWebView() {
         guard webView == nil else { return }
@@ -651,11 +659,12 @@ class UnifiedPaneNSView: NSView {
         currentContent = content
         switch content {
         case .empty:
+            stopWatching()
             webView?.isHidden = true
             imageLayer.isHidden = true
             imageLayer.image = nil
             overlay.contentKind = .empty
-        case .markdown(let text, _, _):
+        case .markdown(let text, _, let url):
             ensureWebView()
             webView?.isHidden = false
             imageLayer.isHidden = true
@@ -663,7 +672,9 @@ class UnifiedPaneNSView: NSView {
             overlay.contentKind = .markdown
             overlay.applyMdZoom()
             webView?.loadHTMLString(MarkdownConverter.toHTML(text), baseURL: nil)
+            startWatching(url)
         case .image(let img, _, _):
+            stopWatching()
             webView?.isHidden = true
             imageLayer.isHidden = false
             overlay.contentKind = .image
@@ -671,6 +682,88 @@ class UnifiedPaneNSView: NSView {
             imageLayer.image = img
             if changed { overlay.resetImageTransform() }
         }
+    }
+
+    // MARK: - File watching (live reload for markdown)
+
+    private func stopWatching() {
+        fileSource?.cancel()
+        fileSource = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
+        watchedURL = nil
+    }
+
+    private func startWatching(_ url: URL) {
+        if watchedURL == url, fileSource != nil { return }
+        stopWatching()
+        watchedURL = url
+        attachWatcher(to: url)
+        // Polling backstop: dispatch sources can miss events when the editor uses
+        // atomic-rename + creates a *new* file each save (the path's underlying
+        // inode keeps changing). 1s mtime check is essentially free.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.reloadFromDisk(url)
+        }
+    }
+
+    private func attachWatcher(to url: URL, retries: Int = 5) {
+        guard watchedURL == url else { return }
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else {
+            // File may be momentarily missing during atomic save (vim's write-temp+rename)
+            if retries > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.attachWatcher(to: url, retries: retries - 1)
+                }
+            }
+            return
+        }
+        let src = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .extend, .delete, .rename],
+            queue: .main
+        )
+        src.setEventHandler { [weak self, weak src] in
+            guard let self, let src else { return }
+            let mask = src.data
+            self.reloadFromDisk(url)
+            // vim/nvim writes a new file then renames over the old — the original inode is
+            // gone, so we must re-open and re-watch the path.
+            if mask.contains(.delete) || mask.contains(.rename) {
+                self.fileSource?.cancel()
+                self.fileSource = nil
+                self.attachWatcher(to: url)
+            }
+        }
+        src.setCancelHandler { close(fd) }
+        fileSource = src
+        src.resume()
+    }
+
+    private func reloadFromDisk(_ url: URL) {
+        guard case .markdown(let oldText, let name, let curURL) = currentContent,
+              curURL == url else { return }
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              text != oldText else { return }
+        let new = PaneContent.markdown(content: text, fileName: name, url: url)
+        currentContent = new
+        onContentReload?(new)
+
+        let body = MarkdownConverter.toBodyHTML(text)
+        guard let bodyData = try? JSONEncoder().encode(body),
+              let bodyJSON = String(data: bodyData, encoding: .utf8) else { return }
+        // In-place swap preserves scroll position; window.* search functions survive
+        // because innerHTML replacement only touches the content div, not the script tag.
+        let js = """
+        (function() {
+          var y = window.scrollY;
+          if (window.__bzbijiClearHits) window.__bzbijiClearHits();
+          var el = document.getElementById('bzbiji-content');
+          if (el) { el.innerHTML = \(bodyJSON); window.scrollTo(0, y); }
+        })();
+        """
+        webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 }
 
@@ -713,6 +806,9 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
             DispatchQueue.main.async { coordinator.parent.onScaleChange(s) }
         }
         v.overlay.onFocus = { coordinator.parent.onFocus() }
+        v.onContentReload = { new in
+            DispatchQueue.main.async { coordinator.parent.content = new }
+        }
     }
 }
 

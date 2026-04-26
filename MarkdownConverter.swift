@@ -1,7 +1,9 @@
 import Foundation
 
 enum MarkdownConverter {
-    static func toHTML(_ markdown: String) -> String {
+    static func toHTML(_ markdown: String) -> String { wrapHTML(toBodyHTML(markdown)) }
+
+    static func toBodyHTML(_ markdown: String) -> String {
         let lines = markdown.components(separatedBy: "\n")
         var html = ""
         var i = 0
@@ -109,7 +111,7 @@ enum MarkdownConverter {
         }
 
         closeLists(&html, ul: &inUL, ol: &inOL)
-        return wrapHTML(html)
+        return html
     }
 
     // MARK: - Helpers
@@ -261,7 +263,8 @@ enum MarkdownConverter {
         }
         </style>
         </head>
-        <body>\(body)
+        <body>
+        <div id="bzbiji-content">\(body)</div>
         <script>
         (function(){
           var hits = [], curr = -1, lastQ = null;
