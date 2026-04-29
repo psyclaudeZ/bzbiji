@@ -622,6 +622,8 @@ class UnifiedPaneNSView: NSView {
     private var pollTimer: Timer?
     var onContentReload: ((PaneContent) -> Void)?
 
+    private var appearanceObserver: NSKeyValueObservation?
+
     override init(frame: NSRect) {
         imageLayer = ImageLayerView(frame: .zero)
         overlay = PaneOverlay(frame: .zero)
@@ -637,16 +639,25 @@ class UnifiedPaneNSView: NSView {
         addSubview(overlay)
 
         overlay.imageLayer = imageLayer
+
+        // WKWebView pins prefers-color-scheme to whatever appearance was set
+        // when the page loaded — observe so dark↔light system switches reflect live.
+        appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] app, _ in
+            DispatchQueue.main.async { self?.webView?.appearance = app.effectiveAppearance }
+        }
     }
 
-    deinit { stopWatching() }
+    deinit {
+        stopWatching()
+        appearanceObserver?.invalidate()
+    }
 
     private func ensureWebView() {
         guard webView == nil else { return }
         let config = WKWebViewConfiguration()
         let wv = WKWebView(frame: bounds, configuration: config)
         wv.underPageBackgroundColor = NSColor.textBackgroundColor
-        wv.appearance = NSApp.effectiveAppearance  // match system appearance explicitly
+        wv.appearance = NSApp.effectiveAppearance
         wv.autoresizingMask = [.width, .height]
         wv.isHidden = true
         webView = wv
