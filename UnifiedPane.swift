@@ -305,7 +305,6 @@ private class PaneOverlay: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.fileURL])
 
         let mag = NSMagnificationGestureRecognizer(target: self, action: #selector(handleMag(_:)))
         addGestureRecognizer(mag)
@@ -341,6 +340,13 @@ private class PaneOverlay: NSView {
         // Suspected cause: something upstream (gesture recognizers? AppKit event dispatch?
         // compositor scheduling?) is delaying the repaint despite display() being called.
         // Arrow key focus (pure SwiftUI path) is fast — investigate why mouse is different.
+        handleClickFocus()
+        super.mouseDown(with: event)
+    }
+
+    // Called from FocusableWebView too — markdown clicks bypass overlay's mouseDown
+    // because hitTest passes them through to the webView for text selection.
+    func handleClickFocus() {
         if PaneOverlay.activeFocusOverlay !== self {
             PaneOverlay.activeFocusOverlay?.isFocused = false
             PaneOverlay.activeFocusOverlay?.display()
@@ -349,7 +355,14 @@ private class PaneOverlay: NSView {
             display()
         }
         DispatchQueue.main.async { self.onFocus?() }
-        super.mouseDown(with: event)
+    }
+
+    // For markdown panes, let clicks fall through to the WKWebView so text
+    // selection works. Search bar and image panes still hit-test normally.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        if hit === self, contentKind == .markdown { return webView }
+        return hit
     }
 
     // MARK: Search
@@ -607,10 +620,20 @@ private class PaneOverlay: NSView {
     }
 }
 
+// MARK: - WKWebView subclass for focus tracking
+
+private class FocusableWebView: WKWebView {
+    var onMouseDown: (() -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?()
+        super.mouseDown(with: event)
+    }
+}
+
 // MARK: - Unified NSView container
 
 class UnifiedPaneNSView: NSView {
-    private var webView: WKWebView?
+    private var webView: FocusableWebView?
     private let imageLayer: ImageLayerView
     fileprivate let overlay: PaneOverlay
 
@@ -640,11 +663,33 @@ class UnifiedPaneNSView: NSView {
 
         overlay.imageLayer = imageLayer
 
+        // Drag-drop registered here (not on overlay) because overlay's hitTest
+        // passes markdown clicks through to webView, removing overlay from the
+        // drag responder chain.
+        registerForDraggedTypes([.fileURL])
+
         // WKWebView pins prefers-color-scheme to whatever appearance was set
         // when the page loaded — observe so dark↔light system switches reflect live.
         appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] app, _ in
             DispatchQueue.main.async { self?.webView?.appearance = app.effectiveAppearance }
         }
+    }
+
+    // Drag-drop forwarders to overlay (which owns indicator drawing & drop logic).
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        overlay.draggingEntered(sender)
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        overlay.draggingUpdated(sender)
+    }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        overlay.draggingExited(sender)
+    }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        overlay.prepareForDragOperation(sender)
+    }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        overlay.performDragOperation(sender)
     }
 
     deinit {
@@ -655,11 +700,14 @@ class UnifiedPaneNSView: NSView {
     private func ensureWebView() {
         guard webView == nil else { return }
         let config = WKWebViewConfiguration()
-        let wv = WKWebView(frame: bounds, configuration: config)
+        let wv = FocusableWebView(frame: bounds, configuration: config)
         wv.underPageBackgroundColor = NSColor.textBackgroundColor
         wv.appearance = NSApp.effectiveAppearance
         wv.autoresizingMask = [.width, .height]
         wv.isHidden = true
+        // Stop WKWebView from intercepting file drops (so they bubble to parent).
+        wv.unregisterDraggedTypes()
+        wv.onMouseDown = { [weak self] in self?.overlay.handleClickFocus() }
         webView = wv
         addSubview(wv, positioned: .below, relativeTo: imageLayer)
         overlay.webView = wv
