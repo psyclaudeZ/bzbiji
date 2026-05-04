@@ -83,12 +83,22 @@ struct TabManager {
     }
 
     mutating func closeTab(at index: Int) {
-        guard names.count > 1, index >= 0, index < names.count else { return }
-        recentlyClosed.append((name: names[index], content: contents[index]))
-        if recentlyClosed.count > 10 { recentlyClosed.removeFirst() }
-        names.remove(at: index)
-        contents.remove(at: index)
-        if selected >= names.count { selected = names.count - 1 }
+        guard index >= 0, index < names.count else { return }
+        let isLast = names.count == 1
+        // Don't archive an already-empty last tab (avoids restoring fresh blanks).
+        if !(isLast && contents[index].panes.allSatisfy(\.isEmpty)) {
+            recentlyClosed.append((name: names[index], content: contents[index]))
+            if recentlyClosed.count > 10 { recentlyClosed.removeFirst() }
+        }
+        if isLast {
+            names[0] = "Tab 1"
+            contents[0] = TabContent()
+            selected = 0
+        } else {
+            names.remove(at: index)
+            contents.remove(at: index)
+            if selected >= names.count { selected = names.count - 1 }
+        }
     }
 
     mutating func closeSelected() { closeTab(at: selected) }

@@ -100,12 +100,13 @@ private func runAll() {
         expect(m.isConsistent, "isConsistent")
     }
 
-    test("cannot close below 1 tab") {
+    test("closing the last tab resets it to a fresh empty tab") {
         var m = TabManager()
         m.closeTab(at: 0)   // 2 → 1
-        m.closeTab(at: 0)   // no-op
-        m.closeTab(at: 0)   // no-op
+        m.closeTab(at: 0)   // 1 → 1 (reset to fresh)
         eq(m.count, 1, "stays at 1")
+        eq(m.names[0], "Tab 1", "renamed back to Tab 1")
+        expect(m.contents[0].panes.allSatisfy(\.isEmpty), "panes are empty")
         expect(m.isConsistent, "isConsistent")
     }
 

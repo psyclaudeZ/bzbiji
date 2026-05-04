@@ -303,6 +303,8 @@ struct ContentView: View {
                                 tabs.contents[sel].panes.remove(at: focused)
                                 tabs.contents[sel].clampFocus()
                             }
+                        } else if tabs.count == 1 && tabs.contents[0].panes.allSatisfy(\.isEmpty) {
+                            NSApp.terminate(nil)
                         } else {
                             tabs.closeSelected()
                         }
