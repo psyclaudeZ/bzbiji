@@ -50,6 +50,7 @@ private struct TabBar: View {
     let onAdd: () -> Void
     let onClose: (Int) -> Void
     @FocusState private var editFocused: Bool
+    @State private var hovered: Int? = nil
 
     var body: some View {
         HStack(spacing: 1) {
@@ -70,7 +71,7 @@ private struct TabBar: View {
             Spacer()
         }
         .padding(.horizontal, 10)
-        .padding(.top, 7)
+        .padding(.top, 8)
         .background(Color(NSColor.windowBackgroundColor))
         .onChange(of: editFocused) { focused in
             if !focused { editingTab = nil }
@@ -102,16 +103,14 @@ private struct TabBar: View {
                 }
             }
             .foregroundColor(selected == i ? .primary : .secondary)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 7)
-            .background(
-                selected == i
-                    ? Color(NSColor.controlBackgroundColor)
-                    : Color.clear,
-                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-            )
+            .padding(.horizontal, 11)
+            .padding(.top, 5)
+            .padding(.bottom, 8)
+            .background(tabBackground(i))
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 ? i : (hovered == i ? nil : hovered) }
+        .animation(.easeOut(duration: 0.15), value: selected)
         .contextMenu {
             Button("Rename") { selected = i; editingTab = i }
             if names.count > 1 {
@@ -119,6 +118,18 @@ private struct TabBar: View {
                 Button("Close Tab") { onClose(i) }
             }
         }
+    }
+
+    /// No block: the selected tab is marked by a hairline rule sitting on the
+    /// divider, so the only fill in the bar is the transient hover state.
+    private func tabBackground(_ i: Int) -> some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(Color.primary.opacity(hovered == i && selected != i ? 0.04 : 0))
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(selected == i ? Color.primary.opacity(0.75) : .clear)
+                    .frame(height: 2)
+            }
     }
 }
 
