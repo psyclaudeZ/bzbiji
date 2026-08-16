@@ -51,6 +51,11 @@ private struct TabBar: View {
     let onClose: (Int) -> Void
     @FocusState private var editFocused: Bool
     @State private var hovered: Int? = nil
+    @State private var addHovered = false
+
+    /// Air above and below the tabs; the selection rule is offset by this much
+    /// to reach the divider.
+    private let barVerticalPadding: CGFloat = 6
 
     var body: some View {
         HStack(spacing: 1) {
@@ -63,15 +68,19 @@ private struct TabBar: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
                     .frame(width: 26, height: 26)
-                    .background(Color.clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(
+                        Color.primary.opacity(addHovered ? 0.04 : 0),
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    )
             }
             .buttonStyle(.plain)
+            .onHover { addHovered = $0 }
             .padding(.leading, 4)
 
             Spacer()
         }
         .padding(.horizontal, 10)
-        .padding(.top, 8)
+        .padding(.vertical, barVerticalPadding)
         .background(Color(NSColor.windowBackgroundColor))
         .onChange(of: editFocused) { focused in
             if !focused { editingTab = nil }
@@ -104,8 +113,7 @@ private struct TabBar: View {
             }
             .foregroundColor(selected == i ? .primary : .secondary)
             .padding(.horizontal, 11)
-            .padding(.top, 5)
-            .padding(.bottom, 8)
+            .padding(.vertical, 5)
             .background(tabBackground(i))
         }
         .buttonStyle(.plain)
@@ -122,6 +130,9 @@ private struct TabBar: View {
 
     /// No block: the selected tab is marked by a hairline rule sitting on the
     /// divider, so the only fill in the bar is the transient hover state.
+    ///
+    /// The hover fill stays centered in the bar; only the rule is pushed down
+    /// past the bar's bottom padding, so the two don't share one box.
     private func tabBackground(_ i: Int) -> some View {
         RoundedRectangle(cornerRadius: 6, style: .continuous)
             .fill(Color.primary.opacity(hovered == i && selected != i ? 0.04 : 0))
@@ -129,6 +140,7 @@ private struct TabBar: View {
                 Rectangle()
                     .fill(selected == i ? Color.primary.opacity(0.75) : .clear)
                     .frame(height: 2)
+                    .offset(y: barVerticalPadding)
             }
     }
 }
