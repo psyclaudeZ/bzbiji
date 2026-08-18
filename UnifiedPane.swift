@@ -168,6 +168,10 @@ private class PaneOverlay: NSView {
     var contentKind: ContentKind = .empty
     var isSplit: Bool = false
 
+    // Which edges face a sibling pane; the focus border only marks those.
+    var hasLeftNeighbor = false
+    var hasRightNeighbor = false
+
     // Refs to content views below (set by UnifiedPaneNSView)
     weak var imageLayer: ImageLayerView?
     weak var webView: WKWebView?
@@ -611,11 +615,20 @@ private class PaneOverlay: NSView {
             border.lineWidth = 3
             border.stroke()
         } else if isFocused && isSplit {
-            // Focus border — only shown when multiple panes exist
-            NSColor.controlAccentColor.withAlphaComponent(0.9).setStroke()
-            let focusBorder = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
-            focusBorder.lineWidth = 2
-            focusBorder.stroke()
+            // Focus border, tmux-style: only dividers shared with a sibling are
+            // marked, never the window edges, and each divider is split between
+            // its two neighbours — the pane on its left claims the top half, the
+            // pane on its right claims the bottom half. So a focused pane shows
+            // a half-height segment per divider it touches.
+            NSColor.controlAccentColor.withAlphaComponent(0.8).setFill()
+            let w: CGFloat = 2
+            let half = bounds.height / 2
+            if hasRightNeighbor {
+                NSRect(x: bounds.width - w, y: half, width: w, height: half).fill()
+            }
+            if hasLeftNeighbor {
+                NSRect(x: 0, y: 0, width: w, height: half).fill()
+            }
         }
     }
 }
@@ -832,6 +845,8 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
     @Binding var content: PaneContent
     var isSplit: Bool
     var isFocused: Bool
+    var hasLeftNeighbor: Bool
+    var hasRightNeighbor: Bool
     var onDrop: (URL, DropSide) -> Void
     var onScaleChange: (CGFloat) -> Void
     var onFocus: () -> Void
@@ -854,6 +869,9 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
         attach(v, to: context.coordinator)
         v.overlay.isSplit = isSplit
         v.overlay.isFocused = isFocused
+        v.overlay.hasLeftNeighbor = hasLeftNeighbor
+        v.overlay.hasRightNeighbor = hasRightNeighbor
+        v.overlay.needsDisplay = true
         if v.currentContent != content { v.setContent(content) }
     }
 
@@ -877,6 +895,8 @@ struct UnifiedPane: View {
     @Binding var content: PaneContent
     var isSplit: Bool
     var isFocused: Bool
+    var hasLeftNeighbor: Bool = false
+    var hasRightNeighbor: Bool = false
     var onDrop: (URL, DropSide) -> Void
     var onFocus: () -> Void
     var onClose: (() -> Void)?
@@ -891,6 +911,8 @@ struct UnifiedPane: View {
                 content: $content,
                 isSplit: isSplit,
                 isFocused: isFocused,
+                hasLeftNeighbor: hasLeftNeighbor,
+                hasRightNeighbor: hasRightNeighbor,
                 onDrop: onDrop,
                 onScaleChange: { scale = $0 },
                 onFocus: onFocus
@@ -961,6 +983,8 @@ struct TabPaneContainer: View {
                     content: $tab.panes[i],
                     isSplit: tab.isSplit,
                     isFocused: tab.focusedPane == i,
+                    hasLeftNeighbor: i > 0,
+                    hasRightNeighbor: i < tab.panes.count - 1,
                     onDrop: { url, side in handleDrop(url: url, paneIndex: i, side: side) },
                     onFocus: { tab.focusedPane = i },
                     onClose: tab.isSplit ? { closePane(at: i) } : nil
