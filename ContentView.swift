@@ -201,13 +201,13 @@ private struct HelpOverlay: View {
             ("Switch to tab N",  "⌘1 – ⌘8"),
             ("Last tab",         "⌘9"),
         ]),
-        ("Image pane", [
+        ("Panes", [
             ("Zoom in / out",    "⌘ + scroll"),
             ("Pan",              "Scroll / drag"),
             ("Rotate",           "Two-finger rotate"),
             ("Reset view",       "Double-click"),
         ]),
-        ("bzbiji", [
+        ("App", [
             ("Open file",          "⌘O"),
             ("Open to the right",  "⌘\\"),
             ("Keyboard shortcuts", "⌘?"),
