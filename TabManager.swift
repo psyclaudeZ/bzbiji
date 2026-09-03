@@ -43,7 +43,8 @@ extension PaneContent: Equatable {
 
 // MARK: - Per-tab content
 
-struct TabContent {
+struct TabContent: Identifiable {
+    let id = UUID()
     var panes: [PaneContent] = [.empty]
     var focusedPane: Int = 0
     var isSplit: Bool { panes.count > 1 }
@@ -64,7 +65,10 @@ struct TabManager {
     init(names: [String] = ["Tab 1", "Tab 2"]) {
         precondition(!names.isEmpty)
         self.names    = names
-        self.contents = Array(repeating: TabContent(), count: names.count)
+        // Construct each tab independently so every tab has a stable, unique
+        // identity. SwiftUI uses this identity to keep its pane views alive
+        // while another tab is selected.
+        self.contents = names.map { _ in TabContent() }
         self.selected = 0
     }
 

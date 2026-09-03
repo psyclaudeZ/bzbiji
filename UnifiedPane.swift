@@ -975,6 +975,7 @@ struct UnifiedPane: View {
 
 struct TabPaneContainer: View {
     @Binding var tab: TabContent
+    var isActive: Bool = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -982,7 +983,10 @@ struct TabPaneContainer: View {
                 UnifiedPane(
                     content: $tab.panes[i],
                     isSplit: tab.isSplit,
-                    isFocused: tab.focusedPane == i,
+                    // Hidden tabs stay mounted to preserve their native view
+                    // state, but only the selected tab may install focus/key
+                    // handling.
+                    isFocused: isActive && tab.focusedPane == i,
                     hasLeftNeighbor: i > 0,
                     hasRightNeighbor: i < tab.panes.count - 1,
                     onDrop: { url, side in handleDrop(url: url, paneIndex: i, side: side) },

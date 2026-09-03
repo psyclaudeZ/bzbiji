@@ -52,6 +52,16 @@ private func runAll() {
         eq(m.names.count, m.contents.count, "lengths equal")
     }
 
+    test("tabs have stable unique identities") {
+        var m = TabManager()
+        let firstID = m.contents[0].id
+        expect(m.contents[0].id != m.contents[1].id, "initial tab IDs are unique")
+        m.selected = 1
+        eq(m.contents[0].id, firstID, "selection preserves identity")
+        m.addTab()
+        expect(Set(m.contents.map(\.id)).count == m.contents.count, "added tab ID is unique")
+    }
+
     test("addTab appends and selects new tab") {
         var m = TabManager()
         m.addTab()

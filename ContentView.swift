@@ -301,8 +301,23 @@ struct ContentView: View {
                 )
                 Divider()
 
-                TabPaneContainer(tab: $tabs.contents[tabs.selected])
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Keep every tab's native pane hierarchy mounted. A WKWebView
+                // loses its scroll position when it is reused for another
+                // document, so swapping one selected binding here would reset
+                // the previous tab to the top. Stable tab identities let each
+                // tab retain its own WKWebView (and image transform) while it is
+                // temporarily hidden.
+                ZStack {
+                    ForEach($tabs.contents) { $tab in
+                        let isSelected = tab.id == tabs.contents[tabs.selected].id
+                        TabPaneContainer(tab: $tab, isActive: isSelected)
+                            .opacity(isSelected ? 1 : 0)
+                            .allowsHitTesting(isSelected)
+                            .accessibilityHidden(!isSelected)
+                            .zIndex(isSelected ? 1 : 0)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Hidden shortcut buttons
