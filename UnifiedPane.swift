@@ -843,6 +843,7 @@ class UnifiedPaneNSView: NSView {
 
 struct UnifiedPaneRepresentable: NSViewRepresentable {
     @Binding var content: PaneContent
+    var isActive: Bool
     var isSplit: Bool
     var isFocused: Bool
     var hasLeftNeighbor: Bool
@@ -860,6 +861,7 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> UnifiedPaneNSView {
         let v = UnifiedPaneNSView()
+        v.isHidden = !isActive
         attach(v, to: context.coordinator)
         return v
     }
@@ -867,6 +869,10 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
     func updateNSView(_ v: UnifiedPaneNSView, context: Context) {
         context.coordinator.parent = self
         attach(v, to: context.coordinator)
+        // SwiftUI opacity does not reliably hide WKWebView's out-of-process
+        // scrollbar. AppKit visibility does, while retaining the native view
+        // and its scroll position for the next tab switch.
+        v.isHidden = !isActive
         v.overlay.isSplit = isSplit
         v.overlay.isFocused = isFocused
         v.overlay.hasLeftNeighbor = hasLeftNeighbor
@@ -893,6 +899,7 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
 
 struct UnifiedPane: View {
     @Binding var content: PaneContent
+    var isActive: Bool = true
     var isSplit: Bool
     var isFocused: Bool
     var hasLeftNeighbor: Bool = false
@@ -909,6 +916,7 @@ struct UnifiedPane: View {
 
             UnifiedPaneRepresentable(
                 content: $content,
+                isActive: isActive,
                 isSplit: isSplit,
                 isFocused: isFocused,
                 hasLeftNeighbor: hasLeftNeighbor,
@@ -982,6 +990,7 @@ struct TabPaneContainer: View {
             ForEach(tab.panes.indices, id: \.self) { i in
                 UnifiedPane(
                     content: $tab.panes[i],
+                    isActive: isActive,
                     isSplit: tab.isSplit,
                     // Hidden tabs stay mounted to preserve their native view
                     // state, but only the selected tab may install focus/key
