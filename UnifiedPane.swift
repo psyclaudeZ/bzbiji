@@ -147,7 +147,13 @@ private class SearchBarView: NSView, NSTextFieldDelegate {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        if selector == #selector(NSResponder.insertNewline(_:))    { onNext?();  return true }
+        if selector == #selector(NSResponder.insertNewline(_:)) {
+            let modifiers = NSApp.currentEvent?.modifierFlags
+                .intersection(.deviceIndependentFlagsMask) ?? []
+            if modifiers.contains(.shift) { onPrev?() }
+            else                           { onNext?() }
+            return true
+        }
         if selector == #selector(NSResponder.cancelOperation(_:))  { onClose?(); return true }
         if selector == #selector(NSResponder.moveUp(_:))           { onPrev?();  return true }
         if selector == #selector(NSResponder.moveDown(_:))         { onNext?();  return true }
