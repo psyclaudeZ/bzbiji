@@ -188,7 +188,10 @@ enum MarkdownConverter {
         <style>
         :root { color-scheme: light dark; }
         * { box-sizing: border-box; }
-        html { scroll-behavior: smooth; }
+        html {
+            scroll-behavior: smooth;
+            background: #f5f2ea;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
             font-size: 15px;
@@ -199,6 +202,7 @@ enum MarkdownConverter {
             background: transparent;
         }
         @media (prefers-color-scheme: dark) {
+            html { background: #262522; }
             body { color: #e8e8e8; }
             code { background: rgba(255,255,255,0.1); }
             pre  { background: rgba(255,255,255,0.07); }

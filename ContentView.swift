@@ -59,8 +59,8 @@ private struct TabBar: View {
     @State private var hovered: Int? = nil
     @State private var addHovered = false
 
-    /// Air above and below the tabs; the selection rule is offset by this much
-    /// to reach the divider.
+    /// Air above and below the tabs; the selected surface extends through the
+    /// bottom padding to meet the document.
     private let barVerticalPadding: CGFloat = 6
 
     var body: some View {
@@ -87,7 +87,7 @@ private struct TabBar: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, barVerticalPadding)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color(AppPalette.tabBarBackground))
         .onChange(of: editFocused) { focused in
             if !focused { editingTab = nil }
         }
@@ -134,20 +134,27 @@ private struct TabBar: View {
         }
     }
 
-    /// No block: the selected tab is marked by a hairline rule sitting on the
-    /// divider, so the only fill in the bar is the transient hover state.
-    ///
-    /// The hover fill stays centered in the bar; only the rule is pushed down
-    /// past the bar's bottom padding, so the two don't share one box.
+    /// The selected tab borrows the document surface and bridges through the
+    /// bar's bottom padding. This connects selection to content without a
+    /// full-width separator; unselected tabs retain only a hover treatment.
     private func tabBackground(_ i: Int) -> some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(Color.primary.opacity(hovered == i && selected != i ? 0.04 : 0))
-            .overlay(alignment: .bottom) {
+        ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(
+                    selected == i
+                        ? Color(AppPalette.background)
+                        : Color.primary.opacity(hovered == i ? 0.04 : 0)
+                )
+
+            if selected == i {
+                // Square off the lower corners and carry the selected surface
+                // to the document boundary below the button's own bounds.
                 Rectangle()
-                    .fill(selected == i ? Color.primary.opacity(0.75) : .clear)
-                    .frame(height: 2)
+                    .fill(Color(AppPalette.background))
+                    .frame(height: barVerticalPadding + 1)
                     .offset(y: barVerticalPadding)
             }
+        }
     }
 }
 
@@ -305,7 +312,6 @@ struct ContentView: View {
                     onAdd: { tabs.addTab() },
                     onClose: { tabs.closeTab(at: $0) }
                 )
-                Divider()
 
                 // Keep every tab's native pane hierarchy mounted. A WKWebView
                 // loses its scroll position when it is reused for another

@@ -2,6 +2,51 @@ import SwiftUI
 import AppKit
 import WebKit
 
+// MARK: - Pane palette
+
+enum AppPalette {
+    // Warm content surfaces. Keeping these centralized ensures the SwiftUI
+    // canvas, AppKit image canvas, and WebKit scrollbar gutter match.
+    private static let lightContent = NSColor(
+        srgbRed: 245.0 / 255.0,
+        green: 242.0 / 255.0,
+        blue: 234.0 / 255.0,
+        alpha: 1
+    )
+    private static let darkContent = NSColor(
+        srgbRed: 38.0 / 255.0,
+        green: 37.0 / 255.0,
+        blue: 34.0 / 255.0,
+        alpha: 1
+    )
+    private static let lightChrome = NSColor(
+        srgbRed: 236.0 / 255.0,
+        green: 232.0 / 255.0,
+        blue: 223.0 / 255.0,
+        alpha: 1
+    )
+    private static let darkChrome = NSColor(
+        srgbRed: 31.0 / 255.0,
+        green: 30.0 / 255.0,
+        blue: 28.0 / 255.0,
+        alpha: 1
+    )
+
+    static func background(for appearance: NSAppearance) -> NSColor {
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? darkContent : lightContent
+    }
+
+    static let background = NSColor(name: nil) { appearance in
+        background(for: appearance)
+    }
+
+    static let tabBarBackground = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? darkChrome : lightChrome
+    }
+}
+
 // MARK: - DropSide
 
 enum DropSide { case left, center, right }
@@ -39,7 +84,7 @@ private class ImageLayerView: NSView {
     override var isOpaque: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.textBackgroundColor.setFill()
+        AppPalette.background(for: effectiveAppearance).setFill()
         bounds.fill()
         guard let image else { return }
         let ctx = NSGraphicsContext.current!.cgContext
@@ -747,7 +792,7 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
         appearance.performAsCurrentDrawingAppearance {
             // WKWebView copies this value, so assign it again to avoid retaining
             // the concrete color resolved under the previous system theme.
-            webView.underPageBackgroundColor = NSColor.textBackgroundColor
+            webView.underPageBackgroundColor = AppPalette.background(for: appearance)
         }
 
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -1030,7 +1075,7 @@ struct UnifiedPane: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Color(NSColor.textBackgroundColor)  // base background (NSView has no draw override)
+            Color(AppPalette.background)  // base background (NSView has no draw override)
 
             UnifiedPaneRepresentable(
                 content: $content,
