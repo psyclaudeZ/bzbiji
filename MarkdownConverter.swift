@@ -10,8 +10,6 @@ enum MarkdownConverter {
         var inCodeBlock = false
         var codeLines: [String] = []
         var codeLang = ""
-        var inUL = false
-        var inOL = false
 
         while i < lines.count {
             let line = lines[i]
@@ -24,7 +22,6 @@ enum MarkdownConverter {
                     html += "<pre><code\(lang)>\(esc(code))</code></pre>\n"
                     codeLines = []; codeLang = ""; inCodeBlock = false
                 } else {
-                    closeLists(&html, ul: &inUL, ol: &inOL)
                     codeLang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                     inCodeBlock = true
                 }
@@ -36,19 +33,16 @@ enum MarkdownConverter {
 
             // Empty line
             if trimmed.isEmpty {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "\n"; i += 1; continue
             }
 
             // Horizontal rule
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<hr>\n"; i += 1; continue
             }
 
             // Table: header row followed by separator row
             if trimmed.hasPrefix("|"), i + 1 < lines.count, isTableSep(lines[i + 1]) {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 let headers = tableRow(line)
                 i += 2
                 html += "<table><thead><tr>"
@@ -64,61 +58,131 @@ enum MarkdownConverter {
                 continue
             }
 
+            // Lists are parsed as a complete indentation-aware block so child
+            // bullets and numbers become nested lists inside their parent item.
+            if let item = listItem(in: line) {
+                html += renderList(lines, index: &i, indent: item.indent, kind: item.kind)
+                continue
+            }
+
             // Headers
             if line.hasPrefix("######") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<h6>\(inline(String(line.dropFirst(7))))</h6>\n"
             } else if line.hasPrefix("#####") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<h5>\(inline(String(line.dropFirst(6))))</h5>\n"
             } else if line.hasPrefix("####") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<h4>\(inline(String(line.dropFirst(5))))</h4>\n"
             } else if line.hasPrefix("###") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<h3>\(inline(String(line.dropFirst(4))))</h3>\n"
             } else if line.hasPrefix("##") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<h2>\(inline(String(line.dropFirst(3))))</h2>\n"
             } else if line.hasPrefix("# ") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<h1>\(inline(String(line.dropFirst(2))))</h1>\n"
             }
             // Blockquote
             else if line.hasPrefix("> ") {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<blockquote><p>\(inline(String(line.dropFirst(2))))</p></blockquote>\n"
-            }
-            // Unordered list (including task list items)
-            else if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
-                if inOL { html += "</ol>\n"; inOL = false }
-                if !inUL { html += "<ul>\n"; inUL = true }
-                html += "<li>\(taskItem(String(line.dropFirst(2))))</li>\n"
-            }
-            // Ordered list
-            else if let text = orderedItem(line) {
-                if inUL { html += "</ul>\n"; inUL = false }
-                if !inOL { html += "<ol>\n"; inOL = true }
-                html += "<li>\(inline(text))</li>\n"
             }
             // Paragraph
             else {
-                closeLists(&html, ul: &inUL, ol: &inOL)
                 html += "<p>\(inline(line))</p>\n"
             }
 
             i += 1
         }
 
-        closeLists(&html, ul: &inUL, ol: &inOL)
         return html
     }
 
     // MARK: - Helpers
 
-    private static func closeLists(_ html: inout String, ul: inout Bool, ol: inout Bool) {
-        if ul { html += "</ul>\n"; ul = false }
-        if ol { html += "</ol>\n"; ol = false }
+    private enum ListKind: Equatable {
+        case unordered
+        case ordered
+    }
+
+    private struct ParsedListItem {
+        let indent: Int
+        let kind: ListKind
+        let text: String
+        let number: Int?
+    }
+
+    private static func listItem(in line: String) -> ParsedListItem? {
+        var index = line.startIndex
+        var indent = 0
+        while index < line.endIndex {
+            if line[index] == " " {
+                indent += 1
+            } else if line[index] == "\t" {
+                indent += 4
+            } else {
+                break
+            }
+            index = line.index(after: index)
+        }
+
+        let content = String(line[index...])
+        if content.hasPrefix("- ") || content.hasPrefix("* ") || content.hasPrefix("+ ") {
+            return ParsedListItem(
+                indent: indent,
+                kind: .unordered,
+                text: String(content.dropFirst(2)),
+                number: nil
+            )
+        }
+
+        var markerEnd = content.startIndex
+        while markerEnd < content.endIndex && content[markerEnd].isNumber {
+            markerEnd = content.index(after: markerEnd)
+        }
+        guard markerEnd > content.startIndex,
+              markerEnd < content.endIndex,
+              content[markerEnd] == "." else { return nil }
+        let afterDot = content.index(after: markerEnd)
+        guard afterDot < content.endIndex, content[afterDot] == " " else { return nil }
+
+        return ParsedListItem(
+            indent: indent,
+            kind: .ordered,
+            text: String(content[content.index(after: afterDot)...]),
+            number: Int(content[..<markerEnd])
+        )
+    }
+
+    private static func renderList(_ lines: [String], index: inout Int,
+                                   indent: Int, kind: ListKind) -> String {
+        let tag = kind == .unordered ? "ul" : "ol"
+        let first = listItem(in: lines[index])
+        let start = kind == .ordered && first?.number != 1
+            ? " start=\"\(first?.number ?? 1)\""
+            : ""
+        var html = "<\(tag)\(start)>\n"
+
+        while index < lines.count,
+              let item = listItem(in: lines[index]),
+              item.indent == indent,
+              item.kind == kind {
+            let itemHTML = kind == .unordered ? taskItem(item.text) : inline(item.text)
+            html += "<li>\(itemHTML)"
+            index += 1
+
+            while index < lines.count,
+                  let child = listItem(in: lines[index]),
+                  child.indent > indent {
+                html += "\n" + renderList(
+                    lines,
+                    index: &index,
+                    indent: child.indent,
+                    kind: child.kind
+                )
+            }
+
+            html += "</li>\n"
+        }
+
+        html += "</\(tag)>\n"
+        return html
     }
 
     private static func taskItem(_ text: String) -> String {
@@ -128,15 +192,6 @@ enum MarkdownConverter {
             return "<input type=\"checkbox\" disabled checked> \(inline(String(text.dropFirst(4))))"
         }
         return inline(text)
-    }
-
-    private static func orderedItem(_ line: String) -> String? {
-        var idx = line.startIndex
-        while idx < line.endIndex && line[idx].isNumber { idx = line.index(after: idx) }
-        guard idx > line.startIndex, idx < line.endIndex, line[idx] == "." else { return nil }
-        let afterDot = line.index(after: idx)
-        guard afterDot < line.endIndex, line[afterDot] == " " else { return nil }
-        return String(line[line.index(after: afterDot)...])
     }
 
     private static func isTableSep(_ line: String) -> Bool {
@@ -231,8 +286,20 @@ enum MarkdownConverter {
             margin: 0.8em 0;
         }
         pre code { background: none; padding: 0; font-size: 0.9em; }
-        ul, ol { padding-left: 1.6em; margin: 0.4em 0; }
-        li { margin: 0.25em 0; }
+        /* Fixed marker column: markers align to the parent text edge while item
+           copy starts 2em to the right, including for multi-digit numbers. */
+        ul, ol { list-style: none; padding-left: 2em; margin: 0.4em 0; }
+        li { position: relative; margin: 0.25em 0; }
+        ul > li::before, ol > li::before {
+            position: absolute;
+            left: -2em;
+            width: 1.5em;
+            text-align: left;
+        }
+        ul > li::before { content: "•"; }
+        ol { counter-reset: bzbiji-list-item; }
+        ol > li { counter-increment: bzbiji-list-item; }
+        ol > li::before { content: counter(bzbiji-list-item) "."; }
         input[type="checkbox"] { margin-right: 5px; accent-color: #0066cc; }
         blockquote {
             border-left: 3px solid rgba(0,0,0,0.18);

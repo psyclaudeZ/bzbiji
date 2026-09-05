@@ -1,6 +1,6 @@
 // Run with:
 //   swiftc -sdk $(xcrun --show-sdk-path --sdk macosx) -target arm64-apple-macosx13.0 \
-//     -parse-as-library TabManager.swift Tests/tab_manager_tests.swift \
+//     -parse-as-library TabManager.swift MarkdownConverter.swift Tests/tab_manager_tests.swift \
 //     -framework AppKit -o .test_runner \
 //     && ./.test_runner ; rm -f .test_runner
 
@@ -82,6 +82,41 @@ private func runAll() {
         eq(tab.scrollPositions[0], PaneScrollPosition(x: 0, y: 123), "invalid axis clamped")
         eq(tab.scrollPositions[1], .zero, "missing position padded")
         expect(tab.hasConsistentPaneState, "restored state aligned")
+    }
+
+    test("nested Markdown lists preserve indentation hierarchy") {
+        let markdown = """
+        Topics:
+        1. Parent
+          - Child bullet
+            1. Grandchild number
+          - Second child
+        2. Sibling
+        """
+        let html = MarkdownConverter.toBodyHTML(markdown)
+        let expected = """
+        <p>Topics:</p>
+        <ol>
+        <li>Parent
+        <ul>
+        <li>Child bullet
+        <ol>
+        <li>Grandchild number</li>
+        </ol>
+        </li>
+        <li>Second child</li>
+        </ul>
+        </li>
+        <li>Sibling</li>
+        </ol>
+
+        """
+        eq(html, expected, "nested list HTML")
+    }
+
+    test("ordered Markdown lists retain a non-one starting number") {
+        let html = MarkdownConverter.toBodyHTML("3. Third\n4. Fourth")
+        expect(html.hasPrefix("<ol start=\"3\">"), "ordered-list start retained")
     }
 
     test("addTab appends and selects new tab") {
