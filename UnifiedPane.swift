@@ -683,8 +683,6 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
     var onContentReload: ((PaneContent) -> Void)?
     var onScrollPositionChange: ((PaneScrollPosition) -> Void)?
 
-    private var appearanceObserver: NSKeyValueObservation?
-
     override init(frame: NSRect) {
         imageLayer = ImageLayerView(frame: .zero)
         overlay = PaneOverlay(frame: .zero)
@@ -706,10 +704,15 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
         // drag responder chain.
         registerForDraggedTypes([.fileURL])
 
-        // WKWebView pins prefers-color-scheme to whatever appearance was set
-        // when the page loaded — observe so dark↔light system switches reflect live.
-        appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] app, _ in
-            DispatchQueue.main.async { self?.webView?.appearance = app.effectiveAppearance }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // Wait until AppKit has fully propagated the new appearance through the
+        // window, then re-resolve colors in that appearance's drawing context.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyWebAppearance(self.effectiveAppearance)
         }
     }
 
@@ -735,7 +738,25 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
         webView?.configuration.userContentController.removeScriptMessageHandler(
             forName: Self.scrollMessageName
         )
-        appearanceObserver?.invalidate()
+    }
+
+    private func applyWebAppearance(_ appearance: NSAppearance) {
+        guard let webView else { return }
+        webView.appearance = appearance
+
+        appearance.performAsCurrentDrawingAppearance {
+            // WKWebView copies this value, so assign it again to avoid retaining
+            // the concrete color resolved under the previous system theme.
+            webView.underPageBackgroundColor = NSColor.textBackgroundColor
+        }
+
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let colorScheme = isDark ? "dark" : "light"
+        webView.evaluateJavaScript(
+            "document.documentElement.style.colorScheme = '\(colorScheme)'",
+            completionHandler: nil
+        )
+        webView.needsDisplay = true
     }
 
     private func ensureWebView() {
@@ -764,8 +785,6 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
         config.userContentController.addUserScript(scrollScript)
         config.userContentController.add(scrollMessageProxy, name: Self.scrollMessageName)
         let wv = FocusableWebView(frame: bounds, configuration: config)
-        wv.underPageBackgroundColor = NSColor.textBackgroundColor
-        wv.appearance = NSApp.effectiveAppearance
         wv.autoresizingMask = [.width, .height]
         wv.isHidden = true
         // Stop WKWebView from intercepting file drops (so they bubble to parent).
@@ -775,6 +794,7 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
         webView = wv
         addSubview(wv, positioned: .below, relativeTo: imageLayer)
         overlay.webView = wv
+        applyWebAppearance(effectiveAppearance)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -827,6 +847,8 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard case .markdown = currentContent else { return }
+        // A new document replaces the inline color-scheme override.
+        applyWebAppearance(effectiveAppearance)
         let position = scrollPositionToRestore.sanitized
         let js = """
         (function() {
