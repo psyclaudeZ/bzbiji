@@ -5,6 +5,8 @@ import SwiftUI
 private struct SavedState: Codable {
     var tabNames: [String]
     var tabPaneURLs: [[String?]]   // per-tab, per-pane; nil = empty pane
+    // Optional so sessions saved by older versions still decode.
+    var tabPaneScrollPositions: [[PaneScrollPosition]]?
     var selected: Int
 }
 
@@ -14,6 +16,7 @@ private func saveTabState(_ tabs: TabManager) {
     let state = SavedState(
         tabNames: tabs.names,
         tabPaneURLs: tabs.contents.map { tab in tab.panes.map { $0.sourceURL?.absoluteString } },
+        tabPaneScrollPositions: tabs.contents.map(\.scrollPositions),
         selected: tabs.selected
     )
     if let data = try? JSONEncoder().encode(state) {
@@ -35,7 +38,10 @@ private func restoreTabState() -> TabManager? {
             guard let s, let url = URL(string: s) else { return .empty }
             return PaneContent(url: url) ?? .empty
         }
-        if !panes.isEmpty { manager.contents[i].panes = panes }
+        let positions = state.tabPaneScrollPositions.flatMap { saved in
+            saved.indices.contains(i) ? saved[i] : nil
+        } ?? []
+        manager.contents[i].restorePanes(panes, scrollPositions: positions)
     }
 
     return manager
@@ -285,7 +291,7 @@ struct ContentView: View {
               let content = PaneContent(url: url) else { return }
         let focused = tabs.contents[tabs.selected].focusedPane
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            tabs.contents[tabs.selected].panes[focused] = content
+            tabs.contents[tabs.selected].replacePane(at: focused, with: content)
         }
     }
 
@@ -338,7 +344,7 @@ struct ContentView: View {
                         if tabs.contents[sel].panes.count > 1 {
                             let focused = tabs.contents[sel].focusedPane
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                tabs.contents[sel].panes.remove(at: focused)
+                                tabs.contents[sel].removePane(at: focused)
                                 tabs.contents[sel].clampFocus()
                             }
                         } else if tabs.count == 1 && tabs.contents[0].panes.allSatisfy(\.isEmpty) {
@@ -372,7 +378,7 @@ struct ContentView: View {
                         let focused = tabs.contents[tabs.selected].focusedPane
                         let insertAt = focused + 1
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            tabs.contents[tabs.selected].panes.insert(.empty, at: insertAt)
+                            tabs.contents[tabs.selected].insertPane(.empty, at: insertAt)
                             tabs.contents[tabs.selected].focusedPane = insertAt
                         }
                     }
@@ -389,6 +395,11 @@ struct ContentView: View {
             if let restored = restoreTabState() { tabs = restored }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            saveTabState(tabs)
+        }
+        .onChange(of: tabs.contents.map(\.scrollPositions)) { _ in
+            // Scroll reporting is throttled in the web page, so persisting each
+            // reported position is cheap and also survives an abrupt restart.
             saveTabState(tabs)
         }
     }

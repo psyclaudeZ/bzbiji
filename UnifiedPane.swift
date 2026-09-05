@@ -643,12 +643,30 @@ private class FocusableWebView: WKWebView {
     }
 }
 
+private final class ScrollMessageProxy: NSObject, WKScriptMessageHandler {
+    weak var owner: UnifiedPaneNSView?
+
+    init(owner: UnifiedPaneNSView) {
+        self.owner = owner
+    }
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        owner?.receiveScrollMessage(message)
+    }
+}
+
 // MARK: - Unified NSView container
 
-class UnifiedPaneNSView: NSView {
+class UnifiedPaneNSView: NSView, WKNavigationDelegate {
+    private static let scrollMessageName = "bzbijiScroll"
+
     private var webView: FocusableWebView?
     private let imageLayer: ImageLayerView
     fileprivate let overlay: PaneOverlay
+    private lazy var scrollMessageProxy = ScrollMessageProxy(owner: self)
+    private var scrollPositionToRestore: PaneScrollPosition = .zero
+    private var isRestoringScrollPosition = false
 
     private(set) var currentContent: PaneContent = .empty
 
@@ -657,6 +675,7 @@ class UnifiedPaneNSView: NSView {
     private var watchedURL: URL?
     private var pollTimer: Timer?
     var onContentReload: ((PaneContent) -> Void)?
+    var onScrollPositionChange: ((PaneScrollPosition) -> Void)?
 
     private var appearanceObserver: NSKeyValueObservation?
 
@@ -707,12 +726,37 @@ class UnifiedPaneNSView: NSView {
 
     deinit {
         stopWatching()
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: Self.scrollMessageName
+        )
         appearanceObserver?.invalidate()
     }
 
     private func ensureWebView() {
         guard webView == nil else { return }
         let config = WKWebViewConfiguration()
+        let scrollScript = WKUserScript(
+            source: """
+            (function() {
+              var timer = null;
+              function reportScroll() {
+                timer = null;
+                window.webkit.messageHandlers.bzbijiScroll.postMessage({
+                  x: window.scrollX,
+                  y: window.scrollY
+                });
+              }
+              window.addEventListener('scroll', function() {
+                if (timer !== null) clearTimeout(timer);
+                timer = setTimeout(reportScroll, 100);
+              }, { passive: true });
+            })();
+            """,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        config.userContentController.addUserScript(scrollScript)
+        config.userContentController.add(scrollMessageProxy, name: Self.scrollMessageName)
         let wv = FocusableWebView(frame: bounds, configuration: config)
         wv.underPageBackgroundColor = NSColor.textBackgroundColor
         wv.appearance = NSApp.effectiveAppearance
@@ -721,13 +765,15 @@ class UnifiedPaneNSView: NSView {
         // Stop WKWebView from intercepting file drops (so they bubble to parent).
         wv.unregisterDraggedTypes()
         wv.onMouseDown = { [weak self] in self?.overlay.handleClickFocus() }
+        wv.navigationDelegate = self
         webView = wv
         addSubview(wv, positioned: .below, relativeTo: imageLayer)
         overlay.webView = wv
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func setContent(_ content: PaneContent) {
+    func setContent(_ content: PaneContent,
+                    restoring scrollPosition: PaneScrollPosition = .zero) {
         currentContent = content
         switch content {
         case .empty:
@@ -738,6 +784,8 @@ class UnifiedPaneNSView: NSView {
             overlay.contentKind = .empty
         case .markdown(let text, _, let url):
             ensureWebView()
+            scrollPositionToRestore = scrollPosition.sanitized
+            isRestoringScrollPosition = true
             webView?.isHidden = false
             imageLayer.isHidden = true
             imageLayer.image = nil
@@ -753,6 +801,41 @@ class UnifiedPaneNSView: NSView {
             let changed = imageLayer.image !== img
             imageLayer.image = img
             if changed { overlay.resetImageTransform() }
+        }
+    }
+
+    fileprivate func receiveScrollMessage(_ message: WKScriptMessage) {
+        guard !isRestoringScrollPosition,
+              message.frameInfo.isMainFrame,
+              case .markdown = currentContent,
+              let body = message.body as? [String: Any],
+              let x = body["x"] as? NSNumber,
+              let y = body["y"] as? NSNumber else { return }
+        let position = PaneScrollPosition(
+            x: x.doubleValue,
+            y: y.doubleValue
+        ).sanitized
+        scrollPositionToRestore = position
+        onScrollPositionChange?(position)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard case .markdown = currentContent else { return }
+        let position = scrollPositionToRestore.sanitized
+        let js = """
+        (function() {
+          var oldBehavior = document.documentElement.style.scrollBehavior;
+          document.documentElement.style.scrollBehavior = 'auto';
+          window.scrollTo(\(position.x), \(position.y));
+          document.documentElement.style.scrollBehavior = oldBehavior;
+        })();
+        """
+        webView.evaluateJavaScript(js) { [weak self] _, _ in
+            // Let the scroll event generated by restoration drain before live
+            // scroll messages are accepted.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                self?.isRestoringScrollPosition = false
+            }
         }
     }
 
@@ -843,6 +926,7 @@ class UnifiedPaneNSView: NSView {
 
 struct UnifiedPaneRepresentable: NSViewRepresentable {
     @Binding var content: PaneContent
+    @Binding var scrollPosition: PaneScrollPosition
     var isActive: Bool
     var isSplit: Bool
     var isFocused: Bool
@@ -878,7 +962,9 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
         v.overlay.hasLeftNeighbor = hasLeftNeighbor
         v.overlay.hasRightNeighbor = hasRightNeighbor
         v.overlay.needsDisplay = true
-        if v.currentContent != content { v.setContent(content) }
+        if v.currentContent != content {
+            v.setContent(content, restoring: scrollPosition)
+        }
     }
 
     private func attach(_ v: UnifiedPaneNSView, to coordinator: Coordinator) {
@@ -892,6 +978,9 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
         v.onContentReload = { new in
             DispatchQueue.main.async { coordinator.parent.content = new }
         }
+        v.onScrollPositionChange = { position in
+            DispatchQueue.main.async { coordinator.parent.scrollPosition = position }
+        }
     }
 }
 
@@ -899,6 +988,7 @@ struct UnifiedPaneRepresentable: NSViewRepresentable {
 
 struct UnifiedPane: View {
     @Binding var content: PaneContent
+    @Binding var scrollPosition: PaneScrollPosition
     var isActive: Bool = true
     var isSplit: Bool
     var isFocused: Bool
@@ -916,6 +1006,7 @@ struct UnifiedPane: View {
 
             UnifiedPaneRepresentable(
                 content: $content,
+                scrollPosition: $scrollPosition,
                 isActive: isActive,
                 isSplit: isSplit,
                 isFocused: isFocused,
@@ -990,6 +1081,7 @@ struct TabPaneContainer: View {
             ForEach(tab.panes.indices, id: \.self) { i in
                 UnifiedPane(
                     content: $tab.panes[i],
+                    scrollPosition: $tab.scrollPositions[i],
                     isActive: isActive,
                     isSplit: tab.isSplit,
                     // Hidden tabs stay mounted to preserve their native view
@@ -1017,13 +1109,13 @@ struct TabPaneContainer: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             switch side {
             case .center:
-                tab.panes[paneIndex] = newContent
+                tab.replacePane(at: paneIndex, with: newContent)
                 tab.focusedPane = paneIndex
             case .left:
-                tab.panes.insert(newContent, at: paneIndex)
+                tab.insertPane(newContent, at: paneIndex)
                 tab.focusedPane = paneIndex
             case .right:
-                tab.panes.insert(newContent, at: paneIndex + 1)
+                tab.insertPane(newContent, at: paneIndex + 1)
                 tab.focusedPane = paneIndex + 1
             }
         }
@@ -1032,7 +1124,7 @@ struct TabPaneContainer: View {
     private func closePane(at index: Int) {
         guard tab.panes.count > 1 else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            _ = tab.panes.remove(at: index)
+            tab.removePane(at: index)
             tab.clampFocus()
         }
     }

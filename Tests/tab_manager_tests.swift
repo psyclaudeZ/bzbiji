@@ -62,6 +62,28 @@ private func runAll() {
         expect(Set(m.contents.map(\.id)).count == m.contents.count, "added tab ID is unique")
     }
 
+    test("pane scroll state stays aligned with pane mutations") {
+        var tab = TabContent()
+        tab.scrollPositions[0] = PaneScrollPosition(x: 12, y: 345)
+        tab.insertPane(.empty, at: 0)
+        eq(tab.scrollPositions[0], .zero, "inserted pane starts at top")
+        eq(tab.scrollPositions[1], PaneScrollPosition(x: 12, y: 345), "old pane position shifts")
+        tab.replacePane(at: 1, with: .empty)
+        eq(tab.scrollPositions[1], .zero, "replacement starts at top")
+        tab.removePane(at: 0)
+        expect(tab.hasConsistentPaneState, "scroll state remains aligned")
+    }
+
+    test("restored pane positions are sanitized and padded") {
+        var tab = TabContent()
+        tab.restorePanes([.empty, .empty], scrollPositions: [
+            PaneScrollPosition(x: -4, y: 123)
+        ])
+        eq(tab.scrollPositions[0], PaneScrollPosition(x: 0, y: 123), "invalid axis clamped")
+        eq(tab.scrollPositions[1], .zero, "missing position padded")
+        expect(tab.hasConsistentPaneState, "restored state aligned")
+    }
+
     test("addTab appends and selects new tab") {
         var m = TabManager()
         m.addTab()

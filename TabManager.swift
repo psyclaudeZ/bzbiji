@@ -43,11 +43,60 @@ extension PaneContent: Equatable {
 
 // MARK: - Per-tab content
 
+struct PaneScrollPosition: Codable, Equatable {
+    var x: Double = 0
+    var y: Double = 0
+
+    static let zero = PaneScrollPosition()
+
+    var sanitized: PaneScrollPosition {
+        PaneScrollPosition(
+            x: x.isFinite ? max(0, x) : 0,
+            y: y.isFinite ? max(0, y) : 0
+        )
+    }
+}
+
 struct TabContent: Identifiable {
     let id = UUID()
     var panes: [PaneContent] = [.empty]
+    var scrollPositions: [PaneScrollPosition] = [.zero]
     var focusedPane: Int = 0
     var isSplit: Bool { panes.count > 1 }
+
+    var hasConsistentPaneState: Bool {
+        !panes.isEmpty && panes.count == scrollPositions.count
+    }
+
+    mutating func replacePane(at index: Int, with content: PaneContent) {
+        guard panes.indices.contains(index) else { return }
+        panes[index] = content
+        scrollPositions[index] = .zero
+    }
+
+    mutating func insertPane(_ content: PaneContent, at index: Int) {
+        panes.insert(content, at: index)
+        scrollPositions.insert(.zero, at: index)
+    }
+
+    @discardableResult
+    mutating func removePane(at index: Int) -> PaneContent? {
+        guard panes.count > 1, panes.indices.contains(index) else { return nil }
+        scrollPositions.remove(at: index)
+        return panes.remove(at: index)
+    }
+
+    mutating func restorePanes(_ restoredPanes: [PaneContent],
+                               scrollPositions restoredPositions: [PaneScrollPosition]) {
+        guard !restoredPanes.isEmpty else { return }
+        panes = restoredPanes
+        scrollPositions = restoredPanes.indices.map { index in
+            restoredPositions.indices.contains(index)
+                ? restoredPositions[index].sanitized
+                : .zero
+        }
+        clampFocus()
+    }
 
     mutating func clampFocus() {
         focusedPane = min(focusedPane, panes.count - 1)
@@ -77,7 +126,9 @@ struct TabManager {
 
     /// names.count == contents.count && selected is in bounds
     var isConsistent: Bool {
-        names.count == contents.count && selected >= 0 && selected < names.count
+        names.count == contents.count &&
+        selected >= 0 && selected < names.count &&
+        contents.allSatisfy(\.hasConsistentPaneState)
     }
 
     mutating func addTab() {
