@@ -255,6 +255,9 @@ private class PaneOverlay: NSView {
 
     private var keyMonitor: Any?
     private var lastKey: String = ""
+    private var markdownJumpHistory: [CGPoint] = []
+    private var searchOriginRecorded = false
+    private let maxJumpHistoryCount = 50
 
     private func registerKeyMonitor() {
         guard keyMonitor == nil else { return }
@@ -266,6 +269,13 @@ private class PaneOverlay: NSView {
             // because WKWebView's internal responder IS an NSTextView subclass).
             if event.keyCode == 53, self.searchBar != nil {
                 self.hideSearch()
+                return nil
+            }
+            // Vim-style jump-back. The canonical ⌃O works even while the find
+            // field is focused; plain o is also available in the read-only pane.
+            if mods.contains(.control), key.lowercased() == "o",
+               self.contentKind == .markdown {
+                self.jumpToPreviousMarkdownLocation()
                 return nil
             }
             // ⌘+/⌘-/⌘0 zoom — handled before NSTextView guard so WKWebView's internal
@@ -290,6 +300,15 @@ private class PaneOverlay: NSView {
                     }
                 case .empty: break
                 }
+            }
+            if mods.isEmpty, key == "o", self.contentKind == .markdown,
+               self.searchBar == nil {
+                if let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                   editor.isFieldEditor {
+                    return event
+                }
+                self.jumpToPreviousMarkdownLocation()
+                return nil
             }
             // Vim motions: bail if an actual text-editing field (e.g. tab rename) is active.
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
@@ -333,6 +352,7 @@ private class PaneOverlay: NSView {
     private func vimScrollEdge(bottom: Bool) {
         switch contentKind {
         case .markdown:
+            recordCurrentMarkdownLocation()
             let js = bottom ? "window.scrollTo(0, document.body.scrollHeight)"
                             : "window.scrollTo(0, 0)"
             webView?.evaluateJavaScript(js, completionHandler: nil)
@@ -428,6 +448,7 @@ private class PaneOverlay: NSView {
     func showSearch() {
         guard contentKind == .markdown else { return }
         if searchBar == nil {
+            searchOriginRecorded = false
             let bar = SearchBarView(frame: .zero)
             bar.onQueryChange = { [weak self] q in self?.performSearch(q, backwards: false) }
             bar.onNext  = { [weak self] in self?.performSearch(self?.lastSearchQuery ?? "", backwards: false) }
@@ -448,6 +469,7 @@ private class PaneOverlay: NSView {
         searchBar?.removeFromSuperview()
         searchBar = nil
         lastSearchQuery = ""
+        searchOriginRecorded = false
         webView?.evaluateJavaScript("window.__bzbijiClearHits && window.__bzbijiClearHits()",
                                     completionHandler: nil)
     }
@@ -472,6 +494,10 @@ private class PaneOverlay: NSView {
             searchBar?.updateCount(found: true, query: "")
             return
         }
+        if !searchOriginRecorded {
+            searchOriginRecorded = true
+            recordCurrentMarkdownLocation()
+        }
         let queryJSON = (try? JSONEncoder().encode(query))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
         let dir = backwards ? -1 : 1
@@ -480,6 +506,54 @@ private class PaneOverlay: NSView {
             let count = (result as? Int) ?? 0
             self?.searchBar?.updateCount(found: count > 0, query: query)
         }
+    }
+
+    // MARK: Markdown jump history
+
+    func resetMarkdownJumpHistory() {
+        markdownJumpHistory.removeAll(keepingCapacity: true)
+        searchOriginRecorded = false
+    }
+
+    private func recordCurrentMarkdownLocation() {
+        guard contentKind == .markdown, let webView else { return }
+        webView.evaluateJavaScript("({ x: window.scrollX, y: window.scrollY })") {
+            [weak self] result, _ in
+            guard let self,
+                  let value = result as? [String: Any],
+                  let x = value["x"] as? NSNumber,
+                  let y = value["y"] as? NSNumber else { return }
+            let location = CGPoint(x: x.doubleValue, y: y.doubleValue)
+            if let last = self.markdownJumpHistory.last,
+               abs(last.x - location.x) < 1,
+               abs(last.y - location.y) < 1 {
+                return
+            }
+            self.markdownJumpHistory.append(location)
+            if self.markdownJumpHistory.count > self.maxJumpHistoryCount {
+                self.markdownJumpHistory.removeFirst(
+                    self.markdownJumpHistory.count - self.maxJumpHistoryCount
+                )
+            }
+        }
+    }
+
+    private func jumpToPreviousMarkdownLocation() {
+        guard contentKind == .markdown,
+              let webView,
+              let location = markdownJumpHistory.popLast() else {
+            NSSound.beep()
+            return
+        }
+        let js = """
+        (function() {
+          var oldBehavior = document.documentElement.style.scrollBehavior;
+          document.documentElement.style.scrollBehavior = 'auto';
+          window.scrollTo(\(location.x), \(location.y));
+          document.documentElement.style.scrollBehavior = oldBehavior;
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     // MARK: Transform
@@ -846,6 +920,7 @@ class UnifiedPaneNSView: NSView, WKNavigationDelegate {
     func setContent(_ content: PaneContent,
                     restoring scrollPosition: PaneScrollPosition = .zero) {
         currentContent = content
+        overlay.resetMarkdownJumpHistory()
         switch content {
         case .empty:
             stopWatching()

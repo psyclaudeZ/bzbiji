@@ -219,6 +219,7 @@ private struct HelpOverlay: View {
             ("Pan",              "Scroll / drag"),
             ("Rotate",           "Two-finger rotate"),
             ("Reset view",       "Double-click"),
+            ("Previous location", "o / ⌃O"),
         ]),
         ("App", [
             ("Open file",          "⌘O"),
