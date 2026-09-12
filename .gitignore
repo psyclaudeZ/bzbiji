@@ -7,6 +7,10 @@ bzbiji
 # Test runner artifact
 .test_runner
 
+# Release artifacts
+dist/
+NOTE.md
+
 # macOS
 .DS_Store
 
