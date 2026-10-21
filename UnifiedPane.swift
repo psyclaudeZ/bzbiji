@@ -51,7 +51,7 @@ enum AppPalette {
 
 enum DropSide { case left, center, right }
 
-// MARK: - Persistent markdown zoom (shared across all panes and launches)
+// MARK: - Persistent document zoom (shared by markdown and empty panes)
 
 private extension Notification.Name {
     static let bzbijiMdZoomChanged = Notification.Name("bzbiji.mdZoomChanged")
@@ -290,15 +290,15 @@ private class PaneOverlay: NSView {
                     case "0":      self.resetImageTransform();             return nil
                     default: break
                     }
-                case .markdown:
+                case .markdown, .empty:
                     switch key {
                     case "=", "+": self.mdZoomBy(1.25); return nil
                     case "-":      self.mdZoomBy(0.8);  return nil
                     case "0":      self.mdZoomReset();  return nil
-                    case "f":      self.showSearch();   return nil
+                    case "f" where self.contentKind == .markdown:
+                        self.showSearch(); return nil
                     default: break
                     }
-                case .empty: break
                 }
             }
             if mods.isEmpty, key == "o", self.contentKind == .markdown,
@@ -610,7 +610,11 @@ private class PaneOverlay: NSView {
         case .markdown:
             webView?.scrollWheel(with: event)
         case .empty:
-            super.scrollWheel(with: event)
+            if event.modifierFlags.contains(.command) {
+                mdZoomBy(pow(1.02, -event.scrollingDeltaY))
+            } else {
+                super.scrollWheel(with: event)
+            }
         }
     }
 
@@ -626,8 +630,14 @@ private class PaneOverlay: NSView {
     // MARK: Gestures
 
     @objc private func handleMag(_ gr: NSMagnificationGestureRecognizer) {
-        guard contentKind == .image else { return }
-        zoomToward(CGPoint(x: bounds.midX, y: bounds.midY), factor: 1 + gr.magnification)
+        switch contentKind {
+        case .image:
+            zoomToward(CGPoint(x: bounds.midX, y: bounds.midY), factor: 1 + gr.magnification)
+        case .empty:
+            mdZoomBy(1 + gr.magnification)
+        case .markdown:
+            return
+        }
         gr.magnification = 0
     }
 
@@ -1147,6 +1157,7 @@ struct UnifiedPane: View {
     var onClose: (() -> Void)?
 
     @State private var scale: CGFloat = 1
+    @State private var placeholderZoom = MdZoomStore.load()
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -1169,6 +1180,9 @@ struct UnifiedPane: View {
 
             badge
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bzbijiMdZoomChanged)) { note in
+            if let zoom = note.object as? CGFloat { placeholderZoom = zoom }
+        }
         .contextMenu {
             if case .empty = content {} else {
                 Button("Clear") { content = .empty }
@@ -1181,17 +1195,19 @@ struct UnifiedPane: View {
     }
 
     private var placeholder: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 10 * placeholderZoom) {
             Image(systemName: "doc")
-                .font(.system(size: 44))
+                .font(.system(size: 44 * placeholderZoom))
                 .foregroundColor(.secondary)
             Text("Drop a file")
+                .font(.system(size: NSFont.preferredFont(forTextStyle: .body).pointSize * placeholderZoom))
                 .foregroundColor(.secondary)
             Text(".md  ·  .png  ·  .jpg  ·  .webp")
-                .font(.caption)
+                .font(.system(size: NSFont.preferredFont(forTextStyle: .caption1).pointSize * placeholderZoom))
                 .foregroundColor(Color(NSColor.tertiaryLabelColor))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .allowsHitTesting(false)
     }
 
